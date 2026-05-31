@@ -53,6 +53,8 @@ fun EditorScreen(
     val bayerScale by viewModel.bayerScale.collectAsState()
     val threshold by viewModel.threshold.collectAsState()
     val gamma by viewModel.gamma.collectAsState()
+    val errorDiffusionStrength by viewModel.errorDiffusionStrength.collectAsState()
+    val serpentine by viewModel.serpentine.collectAsState()
     val isPrinting by viewModel.isPrinting.collectAsState()
     val printError by viewModel.printError.collectAsState()
     val connectionState by viewModel.bleManager.state.collectAsState()
@@ -226,6 +228,8 @@ fun EditorScreen(
                     bayerScale = bayerScale,
                     threshold = threshold,
                     gamma = gamma,
+                    errorDiffusionStrength = errorDiffusionStrength,
+                    serpentine = serpentine,
                     favorites = favorites,
                     onAlgorithmChange = viewModel::setAlgorithm,
                     onBrightnessChange = viewModel::setBrightness,
@@ -235,6 +239,8 @@ fun EditorScreen(
                     onBayerScaleChange = viewModel::setBayerScale,
                     onThresholdChange = viewModel::setThreshold,
                     onGammaChange = viewModel::setGamma,
+                    onErrorDiffusionStrengthChange = viewModel::setErrorDiffusionStrength,
+                    onSerpentineChange = viewModel::setSerpentine,
                     onFavoriteSelect = viewModel::applyFavorite,
                     onPickPhoto = {
                         photoPicker.launch(
@@ -492,6 +498,8 @@ private fun ControlsPanel(
     bayerScale: Float,
     threshold: Float,
     gamma: Float,
+    errorDiffusionStrength: Float,
+    serpentine: Boolean,
     favorites: List<com.ditherprint.app.data.SettingsRepository.Favorite>,
     onAlgorithmChange: (DitherAlgorithm) -> Unit,
     onBrightnessChange: (Float) -> Unit,
@@ -501,6 +509,8 @@ private fun ControlsPanel(
     onBayerScaleChange: (Float) -> Unit,
     onThresholdChange: (Float) -> Unit,
     onGammaChange: (Float) -> Unit,
+    onErrorDiffusionStrengthChange: (Float) -> Unit,
+    onSerpentineChange: (Boolean) -> Unit,
     onFavoriteSelect: (com.ditherprint.app.data.SettingsRepository.Favorite) -> Unit,
     onPickPhoto: () -> Unit,
     onCamera: () -> Unit
@@ -595,6 +605,22 @@ private fun ControlsPanel(
                 valueRange = 0f..1f,
                 modifier = Modifier.fillMaxWidth()
             )
+        }
+
+        // Error diffusion controls (for algorithms with a kernel)
+        if (algorithm.kernel != null) {
+            Spacer(Modifier.height(8.dp))
+            Text("Error Strength: ${(errorDiffusionStrength * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
+            Slider(
+                value = errorDiffusionStrength,
+                onValueChange = onErrorDiffusionStrengthChange,
+                valueRange = 0f..1f,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = serpentine, onCheckedChange = onSerpentineChange)
+                Text("Serpentine scanning")
+            }
         }
 
         Spacer(Modifier.height(8.dp))

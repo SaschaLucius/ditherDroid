@@ -88,7 +88,7 @@ enum class DitherAlgorithm(
         )
     ),
     SIERRA2(
-        "Sierra2",
+        "Two-Row Sierra",
         DiffusionKernel(
             listOf(
                 Triple(1, 0, 4),
@@ -97,11 +97,45 @@ enum class DitherAlgorithm(
                 Triple(-1, 1, 2),
                 Triple(0, 1, 3),
                 Triple(1, 1, 2),
-                Triple(2, 1, 1),
-                Triple(-1, 2, 1),
-                Triple(0, 2, 2),
-                Triple(1, 2, 1)
-            ), 12
+                Triple(2, 1, 1)
+            ), 16
+        )
+    ),
+    SIERRA3(
+        "Sierra-3",
+        DiffusionKernel(
+            listOf(
+                Triple(1, 0, 5),
+                Triple(2, 0, 3),
+                Triple(-2, 1, 2),
+                Triple(-1, 1, 4),
+                Triple(0, 1, 5),
+                Triple(1, 1, 4),
+                Triple(2, 1, 2),
+                Triple(-1, 2, 2),
+                Triple(0, 2, 3),
+                Triple(1, 2, 2)
+            ), 32
+        )
+    ),
+    SIERRA_LITE(
+        "Sierra Lite",
+        DiffusionKernel(
+            listOf(
+                Triple(1, 0, 2),
+                Triple(-1, 1, 1),
+                Triple(0, 1, 1)
+            ), 4
+        )
+    ),
+    FALSE_FLOYD_STEINBERG(
+        "False Floyd-Steinberg",
+        DiffusionKernel(
+            listOf(
+                Triple(1, 0, 3),
+                Triple(0, 1, 3),
+                Triple(1, 1, 2)
+            ), 8
         )
     ),
     PIGEON(

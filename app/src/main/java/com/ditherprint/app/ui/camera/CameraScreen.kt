@@ -54,6 +54,8 @@ fun CameraScreen(
     val bayerScale by viewModel.bayerScale.collectAsState()
     val threshold by viewModel.threshold.collectAsState()
     val gamma by viewModel.gamma.collectAsState()
+    val errorDiffusionStrength by viewModel.errorDiffusionStrength.collectAsState()
+    val serpentine by viewModel.serpentine.collectAsState()
 
     var ditheredPreview by remember { mutableStateOf<Bitmap?>(null) }
     var rawCapture by remember { mutableStateOf<Bitmap?>(null) }
@@ -134,6 +136,8 @@ fun CameraScreen(
                         bayerScale = bayerScale,
                         threshold = threshold,
                         gamma = gamma,
+                        errorDiffusionStrength = errorDiffusionStrength,
+                        serpentine = serpentine,
                         onFrameDithered = { ditheredPreview = it },
                         onRawFrame = { rawCapture = it }
                     )
@@ -148,7 +152,9 @@ fun CameraScreen(
                         bayerSize = bayerSize,
                         bayerScale = bayerScale,
                         threshold = threshold,
-                        gamma = gamma
+                        gamma = gamma,
+                        errorDiffusionStrength = errorDiffusionStrength,
+                        serpentine = serpentine
                     )
                 }
             }
@@ -163,6 +169,8 @@ fun CameraScreen(
                 bayerScale = bayerScale,
                 threshold = threshold,
                 gamma = gamma,
+                errorDiffusionStrength = errorDiffusionStrength,
+                serpentine = serpentine,
                 onAlgorithmChange = viewModel::setAlgorithm,
                 onBrightnessChange = viewModel::setBrightness,
                 onContrastChange = viewModel::setContrast,
@@ -170,7 +178,9 @@ fun CameraScreen(
                 onBayerSizeChange = viewModel::setBayerSize,
                 onBayerScaleChange = viewModel::setBayerScale,
                 onThresholdChange = viewModel::setThreshold,
-                onGammaChange = viewModel::setGamma
+                onGammaChange = viewModel::setGamma,
+                onErrorDiffusionStrengthChange = viewModel::setErrorDiffusionStrength,
+                onSerpentineChange = viewModel::setSerpentine
             )
         }
     }
@@ -187,6 +197,8 @@ private fun CameraControlsPanel(
     bayerScale: Float,
     threshold: Float,
     gamma: Float,
+    errorDiffusionStrength: Float,
+    serpentine: Boolean,
     onAlgorithmChange: (DitherAlgorithm) -> Unit,
     onBrightnessChange: (Float) -> Unit,
     onContrastChange: (Float) -> Unit,
@@ -194,7 +206,9 @@ private fun CameraControlsPanel(
     onBayerSizeChange: (Int) -> Unit,
     onBayerScaleChange: (Float) -> Unit,
     onThresholdChange: (Float) -> Unit,
-    onGammaChange: (Float) -> Unit
+    onGammaChange: (Float) -> Unit,
+    onErrorDiffusionStrengthChange: (Float) -> Unit,
+    onSerpentineChange: (Boolean) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -267,6 +281,22 @@ private fun CameraControlsPanel(
             )
         }
 
+        // Error diffusion controls
+        if (algorithm.kernel != null) {
+            Spacer(Modifier.height(4.dp))
+            Text("Error Strength: ${(errorDiffusionStrength * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
+            Slider(
+                value = errorDiffusionStrength,
+                onValueChange = onErrorDiffusionStrengthChange,
+                valueRange = 0f..1f,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = serpentine, onCheckedChange = onSerpentineChange)
+                Text("Serpentine")
+            }
+        }
+
         Spacer(Modifier.height(4.dp))
 
         // Exposure
@@ -314,6 +344,8 @@ private fun DitheredCameraPreview(
     bayerScale: Float,
     threshold: Float,
     gamma: Float,
+    errorDiffusionStrength: Float,
+    serpentine: Boolean,
     onFrameDithered: (Bitmap) -> Unit,
     onRawFrame: (Bitmap) -> Unit
 ) {
@@ -331,6 +363,8 @@ private fun DitheredCameraPreview(
     val currentBayerScale by rememberUpdatedState(bayerScale)
     val currentThreshold by rememberUpdatedState(threshold)
     val currentGamma by rememberUpdatedState(gamma)
+    val currentErrorDiffusionStrength by rememberUpdatedState(errorDiffusionStrength)
+    val currentSerpentine by rememberUpdatedState(serpentine)
 
     DisposableEffect(lifecycleOwner) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
@@ -373,7 +407,9 @@ private fun DitheredCameraPreview(
                         bayerSize = currentBayerSize,
                         bayerScale = currentBayerScale,
                         threshold = currentThreshold,
-                        gamma = currentGamma
+                        gamma = currentGamma,
+                        errorDiffusionStrength = currentErrorDiffusionStrength,
+                        serpentine = currentSerpentine
                     )
                     scaled.recycle()
 
@@ -418,7 +454,9 @@ private fun RawCameraPreview(
     bayerSize: Int,
     bayerScale: Float,
     threshold: Float,
-    gamma: Float
+    gamma: Float,
+    errorDiffusionStrength: Float,
+    serpentine: Boolean
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -432,6 +470,8 @@ private fun RawCameraPreview(
     val currentBayerScale by rememberUpdatedState(bayerScale)
     val currentThreshold by rememberUpdatedState(threshold)
     val currentGamma by rememberUpdatedState(gamma)
+    val currentErrorDiffusionStrength by rememberUpdatedState(errorDiffusionStrength)
+    val currentSerpentine by rememberUpdatedState(serpentine)
 
     AndroidView(
         factory = { ctx ->
@@ -477,7 +517,9 @@ private fun RawCameraPreview(
                             bayerSize = currentBayerSize,
                             bayerScale = currentBayerScale,
                             threshold = currentThreshold,
-                            gamma = currentGamma
+                            gamma = currentGamma,
+                            errorDiffusionStrength = currentErrorDiffusionStrength,
+                            serpentine = currentSerpentine
                         )
                         scaled.recycle()
                         onFrameDithered(dithered)

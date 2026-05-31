@@ -25,7 +25,9 @@ object DitherEngine {
         bayerSize: Int = 4,
         bayerScale: Float = 1f,    // 0..2, strength of ordered dither pattern
         threshold: Float = 0.5f,   // 0..1, threshold for Threshold algorithm
-        gamma: Float = 1.5f        // 0.5..2.5, exposure/gamma curve
+        gamma: Float = 1.5f,       // 0.5..2.5, exposure/gamma curve
+        errorDiffusionStrength: Float = 1f, // 0..1, color bleed reduction
+        serpentine: Boolean = false  // alternate scan direction each row
     ): Bitmap {
         val width = source.width
         val height = source.height
@@ -52,7 +54,7 @@ object DitherEngine {
             DitherAlgorithm.RANDOM -> applyRandom(gray, width, height)
             else -> {
                 val kernel = algorithm.kernel ?: return toBitmap(gray, width, height, invert)
-                applyErrorDiffusion(gray, width, height, kernel.offsets, kernel.divisor)
+                applyErrorDiffusion(gray, width, height, kernel.offsets, kernel.divisor, errorDiffusionStrength, serpentine)
             }
         }
 
@@ -105,18 +107,23 @@ object DitherEngine {
         width: Int,
         height: Int,
         offsets: List<Triple<Int, Int, Int>>,  // dx, dy, weight
-        divisor: Int
+        divisor: Int,
+        strength: Float,
+        serpentine: Boolean
     ) {
         for (y in 0 until height) {
-            for (x in 0 until width) {
+            val leftToRight = !serpentine || y % 2 == 0
+            val xRange = if (leftToRight) 0 until width else (width - 1) downTo 0
+
+            for (x in xRange) {
                 val i = y * width + x
                 val oldPixel = gray[i]
                 val newPixel = if (oldPixel < 128f) 0f else 255f
-                val error = oldPixel - newPixel
+                val error = (oldPixel - newPixel) * strength
                 gray[i] = newPixel
 
                 for ((dx, dy, weight) in offsets) {
-                    val nx = x + dx
+                    val nx = x + if (leftToRight) dx else -dx
                     val ny = y + dy
                     if (nx in 0 until width && ny in 0 until height) {
                         val ni = ny * width + nx

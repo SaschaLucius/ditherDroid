@@ -53,6 +53,12 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _gamma = MutableStateFlow(1.5f)
     val gamma: StateFlow<Float> = _gamma
 
+    private val _errorDiffusionStrength = MutableStateFlow(1f)
+    val errorDiffusionStrength: StateFlow<Float> = _errorDiffusionStrength
+
+    private val _serpentine = MutableStateFlow(false)
+    val serpentine: StateFlow<Boolean> = _serpentine
+
     // Image state
     private val _rawBitmap = MutableStateFlow<Bitmap?>(null)
     val rawBitmap: StateFlow<Bitmap?> = _rawBitmap
@@ -110,9 +116,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             combine(
                 _algorithm, _brightness, _contrast, _invert, _bayerSize,
-                _bayerScale, _threshold, _gamma, _originalBitmap
+                _bayerScale, _threshold, _gamma, _errorDiffusionStrength,
+                _serpentine
             ) { values ->
                 values // just trigger the combine
+            }.combine(_originalBitmap) { _, _ -> Unit
             }.debounce(150).collect {
                 Log.d(TAG, "redither triggered by combine flow. originalBitmap=${_originalBitmap.value?.width}x${_originalBitmap.value?.height}")
                 redither()
@@ -227,7 +235,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 bayerSize = _bayerSize.value,
                 bayerScale = _bayerScale.value,
                 threshold = _threshold.value,
-                gamma = _gamma.value
+                gamma = _gamma.value,
+                errorDiffusionStrength = _errorDiffusionStrength.value,
+                serpentine = _serpentine.value
             )
             if (isActive) {
                 _ditheredBitmap.value = result
@@ -247,6 +257,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun setBayerScale(v: Float) { _bayerScale.value = v }
     fun setThreshold(v: Float) { _threshold.value = v }
     fun setGamma(v: Float) { _gamma.value = v }
+    fun setErrorDiffusionStrength(v: Float) { _errorDiffusionStrength.value = v }
+    fun setSerpentine(v: Boolean) { _serpentine.value = v }
     fun toggleShowOriginal() { _showOriginal.value = !_showOriginal.value }
     fun showSaveFavoriteDialog() { _showSaveFavoriteDialog.value = true }
     fun dismissSaveFavoriteDialog() { _showSaveFavoriteDialog.value = false }
