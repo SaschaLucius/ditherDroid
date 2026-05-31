@@ -53,6 +53,7 @@ fun CameraScreen(
     val bayerSize by viewModel.bayerSize.collectAsState()
 
     var ditheredPreview by remember { mutableStateOf<Bitmap?>(null) }
+    var rawCapture by remember { mutableStateOf<Bitmap?>(null) }
     var showDithered by remember { mutableStateOf(true) }
     var hasCameraPermission by remember { mutableStateOf(false) }
 
@@ -95,8 +96,8 @@ fun CameraScreen(
         },
         floatingActionButton = {
             FloatingActionButton(onClick = {
-                // Capture current dithered frame and send to editor
-                ditheredPreview?.let { bitmap ->
+                // Send the raw undithered frame to the editor so it re-dithers at printer resolution
+                rawCapture?.let { bitmap ->
                     viewModel.loadBitmap(bitmap.copy(Bitmap.Config.ARGB_8888, false))
                     onCapture()
                 }
@@ -127,11 +128,13 @@ fun CameraScreen(
                         contrast = contrast,
                         invert = invert,
                         bayerSize = bayerSize,
-                        onFrameDithered = { ditheredPreview = it }
+                        onFrameDithered = { ditheredPreview = it },
+                        onRawFrame = { rawCapture = it }
                     )
                 } else {
                     RawCameraPreview(
                         onFrameDithered = { ditheredPreview = it },
+                        onRawFrame = { rawCapture = it },
                         algorithm = algorithm,
                         brightness = brightness,
                         contrast = contrast,
@@ -258,7 +261,8 @@ private fun DitheredCameraPreview(
     contrast: Float,
     invert: Boolean,
     bayerSize: Int,
-    onFrameDithered: (Bitmap) -> Unit
+    onFrameDithered: (Bitmap) -> Unit,
+    onRawFrame: (Bitmap) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -295,12 +299,14 @@ private fun DitheredCameraPreview(
                 imageProxy.close()
 
                 if (bitmap != null) {
-                    // Downscale for performance
+                    // Keep full-res raw frame for capture
+                    onRawFrame(bitmap)
+
+                    // Downscale for live dither preview performance
                     val targetWidth = 280
                     val aspect = bitmap.height.toFloat() / bitmap.width.toFloat()
                     val targetHeight = (targetWidth * aspect).toInt()
                     val scaled = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
-                    if (scaled !== bitmap) bitmap.recycle()
 
                     val dithered = DitherEngine.process(
                         source = scaled,
@@ -345,6 +351,7 @@ private fun DitheredCameraPreview(
 @Composable
 private fun RawCameraPreview(
     onFrameDithered: (Bitmap) -> Unit,
+    onRawFrame: (Bitmap) -> Unit,
     algorithm: DitherAlgorithm,
     brightness: Float,
     contrast: Float,
@@ -389,11 +396,12 @@ private fun RawCameraPreview(
                     imageProxy.close()
 
                     if (bitmap != null) {
+                        onRawFrame(bitmap)
+
                         val targetWidth = 280
                         val aspect = bitmap.height.toFloat() / bitmap.width.toFloat()
                         val targetHeight = (targetWidth * aspect).toInt()
                         val scaled = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
-                        if (scaled !== bitmap) bitmap.recycle()
 
                         val dithered = DitherEngine.process(
                             source = scaled,
