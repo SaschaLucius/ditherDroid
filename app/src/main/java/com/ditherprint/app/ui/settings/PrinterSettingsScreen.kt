@@ -2,7 +2,10 @@ package com.ditherprint.app.ui.settings
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,14 +17,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.ditherprint.app.printer.PhomemoBleManager
 import com.ditherprint.app.printer.PhomemoProtocol
 import com.ditherprint.app.ui.editor.EditorViewModel
-import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.rememberMultiplePermissionsState
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PrinterSettingsScreen(
     viewModel: EditorViewModel,
@@ -32,15 +35,33 @@ fun PrinterSettingsScreen(
     val printerSettings by viewModel.printerSettings.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
 
-    val blePermissions = rememberMultiplePermissionsState(
+    val context = LocalContext.current
+    val blePermissions = remember {
         buildList {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 add(Manifest.permission.BLUETOOTH_SCAN)
                 add(Manifest.permission.BLUETOOTH_CONNECT)
             }
             add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }.toTypedArray()
+    }
+
+    var permissionsGranted by remember {
+        mutableStateOf(
+            blePermissions.all {
+                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+            }
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        permissionsGranted = grants.values.all { it }
+        if (permissionsGranted) {
+            viewModel.bleManager.startScan()
         }
-    )
+    }
 
     Scaffold(
         topBar = {
@@ -112,10 +133,10 @@ fun PrinterSettingsScreen(
                                 }
                                 else -> {
                                     Button(onClick = {
-                                        if (blePermissions.allPermissionsGranted) {
+                                        if (permissionsGranted) {
                                             viewModel.bleManager.startScan()
                                         } else {
-                                            blePermissions.launchMultiplePermissionRequest()
+                                            permissionLauncher.launch(blePermissions)
                                         }
                                     }) {
                                         Icon(Icons.Default.BluetoothSearching, contentDescription = null)
