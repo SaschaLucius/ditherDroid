@@ -13,8 +13,6 @@ import kotlin.math.roundToInt
  */
 object DitherEngine {
 
-    private const val GAMMA = 1.5f
-
     /**
      * Main entry: takes an ARGB_8888 Bitmap, returns a new 1-bit-style Bitmap (black/white).
      */
@@ -24,7 +22,10 @@ object DitherEngine {
         brightness: Float = 0f,    // -1..1
         contrast: Float = 1f,      // 0..2
         invert: Boolean = false,
-        bayerSize: Int = 4
+        bayerSize: Int = 4,
+        bayerScale: Float = 1f,    // 0..2, strength of ordered dither pattern
+        threshold: Float = 0.5f,   // 0..1, threshold for Threshold algorithm
+        gamma: Float = 1.5f        // 0.5..2.5, exposure/gamma curve
     ): Bitmap {
         val width = source.width
         val height = source.height
@@ -42,12 +43,12 @@ object DitherEngine {
         }
 
         // Apply brightness and contrast in gamma space
-        applyToneAdjustment(gray, brightness, contrast)
+        applyToneAdjustment(gray, brightness, contrast, gamma)
 
         // Apply dithering
         when (algorithm) {
-            DitherAlgorithm.THRESHOLD -> applyThreshold(gray, width, height)
-            DitherAlgorithm.BAYER -> applyBayer(gray, width, height, bayerSize)
+            DitherAlgorithm.THRESHOLD -> applyThreshold(gray, width, height, threshold)
+            DitherAlgorithm.BAYER -> applyBayer(gray, width, height, bayerSize, bayerScale)
             DitherAlgorithm.RANDOM -> applyRandom(gray, width, height)
             else -> {
                 val kernel = algorithm.kernel ?: return toBitmap(gray, width, height, invert)
@@ -58,41 +59,35 @@ object DitherEngine {
         return toBitmap(gray, width, height, invert)
     }
 
-    private fun applyToneAdjustment(gray: FloatArray, brightness: Float, contrast: Float) {
+    private fun applyToneAdjustment(gray: FloatArray, brightness: Float, contrast: Float, gamma: Float) {
         for (i in gray.indices) {
             var v = gray[i]
             // Into gamma space
-            v = ((v / 255f).pow(GAMMA)) * 255f
+            v = ((v / 255f).pow(gamma)) * 255f
             // Brightness
             v += brightness * 255f
             // Contrast around midpoint
             v = ((v - 128f) * contrast) + 128f
             // Back from gamma space
-            v = ((v / 255f).coerceIn(0f, 1f).pow(1f / GAMMA)) * 255f
+            v = ((v / 255f).coerceIn(0f, 1f).pow(1f / gamma)) * 255f
             gray[i] = v.coerceIn(0f, 255f)
         }
     }
 
-    private fun applyThreshold(gray: FloatArray, width: Int, height: Int) {
-        // Use median as threshold (matching node-phomemo-printer)
-        val sorted = gray.clone().also { it.sort() }
-        val median = if (sorted.size % 2 == 1) {
-            sorted[sorted.size / 2]
-        } else {
-            (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2f
-        }
+    private fun applyThreshold(gray: FloatArray, width: Int, height: Int, threshold: Float) {
+        val thresholdValue = threshold * 255f
         for (i in gray.indices) {
-            gray[i] = if (gray[i] < median) 0f else 255f
+            gray[i] = if (gray[i] < thresholdValue) 0f else 255f
         }
     }
 
-    private fun applyBayer(gray: FloatArray, width: Int, height: Int, size: Int) {
+    private fun applyBayer(gray: FloatArray, width: Int, height: Int, size: Int, scale: Float) {
         val matrix = BayerMatrix.generate(size)
         val max = size * size
         for (y in 0 until height) {
             for (x in 0 until width) {
                 val i = y * width + x
-                val threshold = (matrix[y % size][x % size].toFloat() / max - 0.5f) * 255f
+                val threshold = (matrix[y % size][x % size].toFloat() / max - 0.5f) * 255f * scale
                 gray[i] = if (gray[i] + threshold >= 128f) 255f else 0f
             }
         }

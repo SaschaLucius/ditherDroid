@@ -50,6 +50,9 @@ fun EditorScreen(
     val contrast by viewModel.contrast.collectAsState()
     val invert by viewModel.invert.collectAsState()
     val bayerSize by viewModel.bayerSize.collectAsState()
+    val bayerScale by viewModel.bayerScale.collectAsState()
+    val threshold by viewModel.threshold.collectAsState()
+    val gamma by viewModel.gamma.collectAsState()
     val isPrinting by viewModel.isPrinting.collectAsState()
     val printError by viewModel.printError.collectAsState()
     val connectionState by viewModel.bleManager.state.collectAsState()
@@ -220,12 +223,18 @@ fun EditorScreen(
                     contrast = contrast,
                     invert = invert,
                     bayerSize = bayerSize,
+                    bayerScale = bayerScale,
+                    threshold = threshold,
+                    gamma = gamma,
                     favorites = favorites,
                     onAlgorithmChange = viewModel::setAlgorithm,
                     onBrightnessChange = viewModel::setBrightness,
                     onContrastChange = viewModel::setContrast,
                     onInvertChange = viewModel::setInvert,
                     onBayerSizeChange = viewModel::setBayerSize,
+                    onBayerScaleChange = viewModel::setBayerScale,
+                    onThresholdChange = viewModel::setThreshold,
+                    onGammaChange = viewModel::setGamma,
                     onFavoriteSelect = viewModel::applyFavorite,
                     onPickPhoto = {
                         photoPicker.launch(
@@ -480,12 +489,18 @@ private fun ControlsPanel(
     contrast: Float,
     invert: Boolean,
     bayerSize: Int,
+    bayerScale: Float,
+    threshold: Float,
+    gamma: Float,
     favorites: List<com.ditherprint.app.data.SettingsRepository.Favorite>,
     onAlgorithmChange: (DitherAlgorithm) -> Unit,
     onBrightnessChange: (Float) -> Unit,
     onContrastChange: (Float) -> Unit,
     onInvertChange: (Boolean) -> Unit,
     onBayerSizeChange: (Int) -> Unit,
+    onBayerScaleChange: (Float) -> Unit,
+    onThresholdChange: (Float) -> Unit,
+    onGammaChange: (Float) -> Unit,
     onFavoriteSelect: (com.ditherprint.app.data.SettingsRepository.Favorite) -> Unit,
     onPickPhoto: () -> Unit,
     onCamera: () -> Unit
@@ -560,9 +575,38 @@ private fun ControlsPanel(
                     )
                 }
             }
+            Spacer(Modifier.height(4.dp))
+            Text("Bayer Amount: ${"%.2f".format(bayerScale)}", style = MaterialTheme.typography.labelMedium)
+            Slider(
+                value = bayerScale,
+                onValueChange = onBayerScaleChange,
+                valueRange = 0f..2f,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Threshold (only shown for Threshold algorithm)
+        if (algorithm == DitherAlgorithm.THRESHOLD) {
+            Spacer(Modifier.height(8.dp))
+            Text("Threshold: ${(threshold * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
+            Slider(
+                value = threshold,
+                onValueChange = onThresholdChange,
+                valueRange = 0f..1f,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         Spacer(Modifier.height(8.dp))
+
+        // Gamma / exposure slider
+        Text("Exposure: ${"%.2f".format(gamma)}", style = MaterialTheme.typography.labelMedium)
+        Slider(
+            value = gamma,
+            onValueChange = onGammaChange,
+            valueRange = 0.5f..2.5f,
+            modifier = Modifier.fillMaxWidth()
+        )
 
         // Brightness slider
         Text("Brightness: ${"%.2f".format(brightness)}", style = MaterialTheme.typography.labelMedium)

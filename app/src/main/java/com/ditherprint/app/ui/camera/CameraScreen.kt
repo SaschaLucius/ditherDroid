@@ -51,6 +51,9 @@ fun CameraScreen(
     val contrast by viewModel.contrast.collectAsState()
     val invert by viewModel.invert.collectAsState()
     val bayerSize by viewModel.bayerSize.collectAsState()
+    val bayerScale by viewModel.bayerScale.collectAsState()
+    val threshold by viewModel.threshold.collectAsState()
+    val gamma by viewModel.gamma.collectAsState()
 
     var ditheredPreview by remember { mutableStateOf<Bitmap?>(null) }
     var rawCapture by remember { mutableStateOf<Bitmap?>(null) }
@@ -128,6 +131,9 @@ fun CameraScreen(
                         contrast = contrast,
                         invert = invert,
                         bayerSize = bayerSize,
+                        bayerScale = bayerScale,
+                        threshold = threshold,
+                        gamma = gamma,
                         onFrameDithered = { ditheredPreview = it },
                         onRawFrame = { rawCapture = it }
                     )
@@ -139,7 +145,10 @@ fun CameraScreen(
                         brightness = brightness,
                         contrast = contrast,
                         invert = invert,
-                        bayerSize = bayerSize
+                        bayerSize = bayerSize,
+                        bayerScale = bayerScale,
+                        threshold = threshold,
+                        gamma = gamma
                     )
                 }
             }
@@ -151,11 +160,17 @@ fun CameraScreen(
                 contrast = contrast,
                 invert = invert,
                 bayerSize = bayerSize,
+                bayerScale = bayerScale,
+                threshold = threshold,
+                gamma = gamma,
                 onAlgorithmChange = viewModel::setAlgorithm,
                 onBrightnessChange = viewModel::setBrightness,
                 onContrastChange = viewModel::setContrast,
                 onInvertChange = viewModel::setInvert,
-                onBayerSizeChange = viewModel::setBayerSize
+                onBayerSizeChange = viewModel::setBayerSize,
+                onBayerScaleChange = viewModel::setBayerScale,
+                onThresholdChange = viewModel::setThreshold,
+                onGammaChange = viewModel::setGamma
             )
         }
     }
@@ -169,11 +184,17 @@ private fun CameraControlsPanel(
     contrast: Float,
     invert: Boolean,
     bayerSize: Int,
+    bayerScale: Float,
+    threshold: Float,
+    gamma: Float,
     onAlgorithmChange: (DitherAlgorithm) -> Unit,
     onBrightnessChange: (Float) -> Unit,
     onContrastChange: (Float) -> Unit,
     onInvertChange: (Boolean) -> Unit,
-    onBayerSizeChange: (Int) -> Unit
+    onBayerSizeChange: (Int) -> Unit,
+    onBayerScaleChange: (Float) -> Unit,
+    onThresholdChange: (Float) -> Unit,
+    onGammaChange: (Float) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -224,9 +245,38 @@ private fun CameraControlsPanel(
                     )
                 }
             }
+            Spacer(Modifier.height(4.dp))
+            Text("Amount: ${"%.2f".format(bayerScale)}", style = MaterialTheme.typography.labelMedium)
+            Slider(
+                value = bayerScale,
+                onValueChange = onBayerScaleChange,
+                valueRange = 0f..2f,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Threshold (only for Threshold algorithm)
+        if (algorithm == DitherAlgorithm.THRESHOLD) {
+            Spacer(Modifier.height(4.dp))
+            Text("Threshold: ${(threshold * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
+            Slider(
+                value = threshold,
+                onValueChange = onThresholdChange,
+                valueRange = 0f..1f,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         Spacer(Modifier.height(4.dp))
+
+        // Exposure
+        Text("Exposure: ${"%.2f".format(gamma)}", style = MaterialTheme.typography.labelMedium)
+        Slider(
+            value = gamma,
+            onValueChange = onGammaChange,
+            valueRange = 0.5f..2.5f,
+            modifier = Modifier.fillMaxWidth()
+        )
 
         // Brightness
         Text("Brightness: ${"%.2f".format(brightness)}", style = MaterialTheme.typography.labelMedium)
@@ -261,6 +311,9 @@ private fun DitheredCameraPreview(
     contrast: Float,
     invert: Boolean,
     bayerSize: Int,
+    bayerScale: Float,
+    threshold: Float,
+    gamma: Float,
     onFrameDithered: (Bitmap) -> Unit,
     onRawFrame: (Bitmap) -> Unit
 ) {
@@ -275,6 +328,9 @@ private fun DitheredCameraPreview(
     val currentContrast by rememberUpdatedState(contrast)
     val currentInvert by rememberUpdatedState(invert)
     val currentBayerSize by rememberUpdatedState(bayerSize)
+    val currentBayerScale by rememberUpdatedState(bayerScale)
+    val currentThreshold by rememberUpdatedState(threshold)
+    val currentGamma by rememberUpdatedState(gamma)
 
     DisposableEffect(lifecycleOwner) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
@@ -314,7 +370,10 @@ private fun DitheredCameraPreview(
                         brightness = currentBrightness,
                         contrast = currentContrast,
                         invert = currentInvert,
-                        bayerSize = currentBayerSize
+                        bayerSize = currentBayerSize,
+                        bayerScale = currentBayerScale,
+                        threshold = currentThreshold,
+                        gamma = currentGamma
                     )
                     scaled.recycle()
 
@@ -356,7 +415,10 @@ private fun RawCameraPreview(
     brightness: Float,
     contrast: Float,
     invert: Boolean,
-    bayerSize: Int
+    bayerSize: Int,
+    bayerScale: Float,
+    threshold: Float,
+    gamma: Float
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -367,6 +429,9 @@ private fun RawCameraPreview(
     val currentContrast by rememberUpdatedState(contrast)
     val currentInvert by rememberUpdatedState(invert)
     val currentBayerSize by rememberUpdatedState(bayerSize)
+    val currentBayerScale by rememberUpdatedState(bayerScale)
+    val currentThreshold by rememberUpdatedState(threshold)
+    val currentGamma by rememberUpdatedState(gamma)
 
     AndroidView(
         factory = { ctx ->
@@ -409,7 +474,10 @@ private fun RawCameraPreview(
                             brightness = currentBrightness,
                             contrast = currentContrast,
                             invert = currentInvert,
-                            bayerSize = currentBayerSize
+                            bayerSize = currentBayerSize,
+                            bayerScale = currentBayerScale,
+                            threshold = currentThreshold,
+                            gamma = currentGamma
                         )
                         scaled.recycle()
                         onFrameDithered(dithered)

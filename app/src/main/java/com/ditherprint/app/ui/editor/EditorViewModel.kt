@@ -44,6 +44,15 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _bayerSize = MutableStateFlow(4)
     val bayerSize: StateFlow<Int> = _bayerSize
 
+    private val _bayerScale = MutableStateFlow(1f)
+    val bayerScale: StateFlow<Float> = _bayerScale
+
+    private val _threshold = MutableStateFlow(0.5f)
+    val threshold: StateFlow<Float> = _threshold
+
+    private val _gamma = MutableStateFlow(1.5f)
+    val gamma: StateFlow<Float> = _gamma
+
     // Image state
     private val _rawBitmap = MutableStateFlow<Bitmap?>(null)
     val rawBitmap: StateFlow<Bitmap?> = _rawBitmap
@@ -100,7 +109,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         // Auto-re-dither when parameters change (debounced)
         viewModelScope.launch {
             combine(
-                _algorithm, _brightness, _contrast, _invert, _bayerSize, _originalBitmap
+                _algorithm, _brightness, _contrast, _invert, _bayerSize,
+                _bayerScale, _threshold, _gamma, _originalBitmap
             ) { values ->
                 values // just trigger the combine
             }.debounce(150).collect {
@@ -214,7 +224,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 brightness = _brightness.value,
                 contrast = _contrast.value,
                 invert = _invert.value,
-                bayerSize = _bayerSize.value
+                bayerSize = _bayerSize.value,
+                bayerScale = _bayerScale.value,
+                threshold = _threshold.value,
+                gamma = _gamma.value
             )
             if (isActive) {
                 _ditheredBitmap.value = result
@@ -231,6 +244,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun setContrast(v: Float) { _contrast.value = v }
     fun setInvert(v: Boolean) { _invert.value = v }
     fun setBayerSize(v: Int) { _bayerSize.value = v }
+    fun setBayerScale(v: Float) { _bayerScale.value = v }
+    fun setThreshold(v: Float) { _threshold.value = v }
+    fun setGamma(v: Float) { _gamma.value = v }
     fun toggleShowOriginal() { _showOriginal.value = !_showOriginal.value }
     fun showSaveFavoriteDialog() { _showSaveFavoriteDialog.value = true }
     fun dismissSaveFavoriteDialog() { _showSaveFavoriteDialog.value = false }
