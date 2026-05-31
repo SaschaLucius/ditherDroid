@@ -111,15 +111,19 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 val context = getApplication<Application>()
 
                 // Two-pass decode: get dimensions first, then downsample
-                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream, null, options)
-                } ?: throw IOException("Cannot open image")
+                val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                val boundsStream = context.contentResolver.openInputStream(uri)
+                    ?: throw IOException("Cannot open image")
+                boundsStream.use { BitmapFactory.decodeStream(it, null, boundsOptions) }
+                // decodeStream returns null intentionally with inJustDecodeBounds=true
+                if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) {
+                    throw IOException("Cannot read image dimensions")
+                }
 
                 // Calculate inSampleSize to avoid OOM on large images
                 val maxDim = 4096
                 var sampleSize = 1
-                while (options.outWidth / sampleSize > maxDim || options.outHeight / sampleSize > maxDim) {
+                while (boundsOptions.outWidth / sampleSize > maxDim || boundsOptions.outHeight / sampleSize > maxDim) {
                     sampleSize *= 2
                 }
 
