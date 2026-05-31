@@ -652,7 +652,7 @@ private fun ControlsPanel(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // Invert + Pick Photo row
+        // Invert + Camera + Pick Photo row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -662,17 +662,15 @@ private fun ControlsPanel(
                 Checkbox(checked = invert, onCheckedChange = onInvertChange)
                 Text("Invert")
             }
-            Row {
-                TextButton(onClick = onCamera) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = null)
-                    Spacer(Modifier.width(4.dp))
-                    Text("Camera")
-                }
-                TextButton(onClick = onPickPhoto) {
-                    Icon(Icons.Default.PhotoLibrary, contentDescription = null)
-                    Spacer(Modifier.width(4.dp))
-                    Text("Photo")
-                }
+            TextButton(onClick = onCamera) {
+                Icon(Icons.Default.CameraAlt, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("Camera")
+            }
+            TextButton(onClick = onPickPhoto) {
+                Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("Photo")
             }
         }
     }
