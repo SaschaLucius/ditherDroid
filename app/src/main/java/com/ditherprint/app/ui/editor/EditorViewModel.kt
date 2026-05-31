@@ -15,9 +15,12 @@ import com.ditherprint.app.dithering.DitherAlgorithm
 import com.ditherprint.app.dithering.DitherEngine
 import com.ditherprint.app.printer.PhomemoBleManager
 import com.ditherprint.app.printer.PhomemoProtocol
+import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.IOException
+
+private const val TAG = "CropDebug"
 
 @OptIn(FlowPreview::class)
 class EditorViewModel(application: Application) : AndroidViewModel(application) {
@@ -100,6 +103,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             ) { values ->
                 values // just trigger the combine
             }.debounce(150).collect {
+                Log.d(TAG, "redither triggered by combine flow. originalBitmap=${_originalBitmap.value?.width}x${_originalBitmap.value?.height}")
                 redither()
             }
         }
@@ -132,9 +136,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     BitmapFactory.decodeStream(stream, null, decodeOptions)
                 } ?: throw IOException("Cannot decode image")
 
-                val oldRaw = _rawBitmap.value
                 _rawBitmap.value = bitmap
-                oldRaw?.recycle()
                 _cropRect.value = RectF(0f, 0f, 1f, 1f)
                 _isCropping.value = false
                 applyCropAndResize()
@@ -146,6 +148,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun applyCropAndResize() {
         val raw = _rawBitmap.value ?: return
+        if (raw.isRecycled) return
         val crop = _cropRect.value
         val paperSize = printerSettings.value.paperSize
 
@@ -156,10 +159,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
         val cropped = Bitmap.createBitmap(raw, x, y, w, h)
         val resized = resizeForPrinter(cropped, paperSize.widthPx)
-        if (cropped !== resized) cropped.recycle()
-        val oldOriginal = _originalBitmap.value
+        if (cropped !== resized && cropped !== raw) cropped.recycle()
         _originalBitmap.value = resized
-        oldOriginal?.recycle()
     }
 
     private fun resizeForPrinter(bitmap: Bitmap, targetWidth: Int): Bitmap {
@@ -186,6 +187,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun redither() {
         val source = _originalBitmap.value ?: return
+        Log.d(TAG, "redither() source=${source.width}x${source.height}, recycled=${source.isRecycled}")
         ditherJob?.cancel()
         ditherJob = viewModelScope.launch(Dispatchers.Default) {
             val result = DitherEngine.process(
@@ -197,10 +199,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 bayerSize = _bayerSize.value
             )
             if (isActive) {
-                val oldDithered = _ditheredBitmap.value
                 _ditheredBitmap.value = result
-                oldDithered?.recycle()
+                Log.d(TAG, "redither() DONE. ditheredBitmap=${result.width}x${result.height}")
             } else {
+                Log.d(TAG, "redither() cancelled, recycling result")
                 result.recycle()
             }
         }
@@ -223,9 +225,43 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun applyCrop() {
+        val crop = RectF(_cropRect.value)
+        Log.d(TAG, "applyCrop() called. cropRect=$crop")
+        Log.d(TAG, "  _rawBitmap=${_rawBitmap.value}, recycled=${_rawBitmap.value?.isRecycled}")
+        Log.d(TAG, "  _originalBitmap before=${_originalBitmap.value?.width}x${_originalBitmap.value?.height}")
+        Log.d(TAG, "  _ditheredBitmap before=${_ditheredBitmap.value?.width}x${_ditheredBitmap.value?.height}")
+        ditherJob?.cancel()
         _isCropping.value = false
+        _ditheredBitmap.value = null
+        Log.d(TAG, "  isCropping set to false, ditheredBitmap cleared")
         viewModelScope.launch(Dispatchers.Default) {
-            applyCropAndResize()
+            val raw = _rawBitmap.value
+            if (raw == null) {
+                Log.e(TAG, "  ERROR: _rawBitmap is null, aborting crop")
+                return@launch
+            }
+            if (raw.isRecycled) {
+                Log.e(TAG, "  ERROR: _rawBitmap is recycled, aborting crop")
+                return@launch
+            }
+            val paperSize = printerSettings.value.paperSize
+            Log.d(TAG, "  raw size=${raw.width}x${raw.height}, paperSize=${paperSize.widthPx}")
+
+            val x = (crop.left * raw.width).toInt().coerceIn(0, raw.width - 1)
+            val y = (crop.top * raw.height).toInt().coerceIn(0, raw.height - 1)
+            val w = ((crop.right - crop.left) * raw.width).toInt().coerceIn(1, raw.width - x)
+            val h = ((crop.bottom - crop.top) * raw.height).toInt().coerceIn(1, raw.height - y)
+            Log.d(TAG, "  crop pixels: x=$x, y=$y, w=$w, h=$h")
+
+            val cropped = Bitmap.createBitmap(raw, x, y, w, h)
+            Log.d(TAG, "  cropped bitmap: ${cropped.width}x${cropped.height}")
+            val resized = resizeForPrinter(cropped, paperSize.widthPx)
+            Log.d(TAG, "  resized bitmap: ${resized.width}x${resized.height}")
+            if (cropped !== resized && cropped !== raw) cropped.recycle()
+
+            Log.d(TAG, "  setting _originalBitmap to ${resized.width}x${resized.height} (was ${_originalBitmap.value?.width}x${_originalBitmap.value?.height})")
+            _originalBitmap.value = resized
+            Log.d(TAG, "  applyCrop() DONE. _originalBitmap now=${_originalBitmap.value?.width}x${_originalBitmap.value?.height})")
         }
     }
 
@@ -322,10 +358,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     override fun onCleared() {
+        super.onCleared() // cancels viewModelScope before we recycle bitmaps
         bleManager.disconnect()
         _rawBitmap.value?.recycle()
         _originalBitmap.value?.recycle()
         _ditheredBitmap.value?.recycle()
-        super.onCleared()
     }
 }

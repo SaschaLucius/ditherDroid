@@ -146,7 +146,7 @@ fun EditorScreen(
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
-                val bitmapToShow = if (showOriginal) originalBitmap else ditheredBitmap
+                val bitmapToShow = if (showOriginal) originalBitmap else (ditheredBitmap ?: originalBitmap)
                 if (isCropping && originalBitmap != null) {
                     CroppableImage(
                         bitmap = originalBitmap!!,
