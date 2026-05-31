@@ -109,17 +109,31 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val context = getApplication<Application>()
-                val inputStream = context.contentResolver.openInputStream(uri)
-                    ?: throw IOException("Cannot open image")
-                val bitmap = BitmapFactory.decodeStream(inputStream)
-                inputStream.close()
 
-                if (bitmap != null) {
-                    _rawBitmap.value = bitmap
-                    _cropRect.value = RectF(0f, 0f, 1f, 1f)
-                    _isCropping.value = false
-                    applyCropAndResize()
+                // Two-pass decode: get dimensions first, then downsample
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, options)
+                } ?: throw IOException("Cannot open image")
+
+                // Calculate inSampleSize to avoid OOM on large images
+                val maxDim = 4096
+                var sampleSize = 1
+                while (options.outWidth / sampleSize > maxDim || options.outHeight / sampleSize > maxDim) {
+                    sampleSize *= 2
                 }
+
+                val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, decodeOptions)
+                } ?: throw IOException("Cannot decode image")
+
+                val oldRaw = _rawBitmap.value
+                _rawBitmap.value = bitmap
+                oldRaw?.recycle()
+                _cropRect.value = RectF(0f, 0f, 1f, 1f)
+                _isCropping.value = false
+                applyCropAndResize()
             } catch (e: Exception) {
                 _printError.value = "Failed to load image: ${e.message}"
             }
@@ -138,7 +152,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
         val cropped = Bitmap.createBitmap(raw, x, y, w, h)
         val resized = resizeForPrinter(cropped, paperSize.widthPx)
+        if (cropped !== resized) cropped.recycle()
+        val oldOriginal = _originalBitmap.value
         _originalBitmap.value = resized
+        oldOriginal?.recycle()
     }
 
     private fun resizeForPrinter(bitmap: Bitmap, targetWidth: Int): Bitmap {
@@ -176,7 +193,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 bayerSize = _bayerSize.value
             )
             if (isActive) {
+                val oldDithered = _ditheredBitmap.value
                 _ditheredBitmap.value = result
+                oldDithered?.recycle()
+            } else {
+                result.recycle()
             }
         }
     }
@@ -298,6 +319,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         bleManager.disconnect()
+        _rawBitmap.value?.recycle()
+        _originalBitmap.value?.recycle()
+        _ditheredBitmap.value?.recycle()
         super.onCleared()
     }
 }

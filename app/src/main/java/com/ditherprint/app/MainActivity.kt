@@ -4,7 +4,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Parcelable
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -12,6 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -21,15 +23,18 @@ import com.ditherprint.app.ui.editor.EditorScreen
 import com.ditherprint.app.ui.editor.EditorViewModel
 import com.ditherprint.app.ui.settings.PrinterSettingsScreen
 import com.ditherprint.app.ui.theme.DitherPrintTheme
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
+
+    private val sharedImageUri = MutableStateFlow<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         // Extract shared image URI if launched via share intent
-        val sharedImageUri = handleShareIntent(intent)
+        handleShareIntent(intent)?.let { sharedImageUri.value = it }
 
         setContent {
             DitherPrintTheme {
@@ -45,19 +50,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Handle share intent when activity is already running
         handleShareIntent(intent)?.let { uri ->
-            // Re-set content to pass new URI (simplest approach)
-            setContent {
-                DitherPrintTheme {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background
-                    ) {
-                        DitherPrintNavigation(uri)
-                    }
-                }
-            }
+            sharedImageUri.value = uri
         }
     }
 
@@ -75,14 +69,16 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun DitherPrintNavigation(sharedImageUri: Uri? = null) {
+fun DitherPrintNavigation(sharedImageUriFlow: MutableStateFlow<Uri?>) {
     val navController = rememberNavController()
     val viewModel: EditorViewModel = viewModel()
 
-    // Load shared image if provided
-    if (sharedImageUri != null) {
-        androidx.compose.runtime.LaunchedEffect(sharedImageUri) {
-            viewModel.loadImage(sharedImageUri)
+    // Load shared image when URI changes
+    val sharedUri by sharedImageUriFlow.collectAsState()
+    LaunchedEffect(sharedUri) {
+        sharedUri?.let {
+            viewModel.loadImage(it)
+            sharedImageUriFlow.value = null
         }
     }
 

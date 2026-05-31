@@ -4,10 +4,9 @@ import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
-import android.os.ParcelUuid
+import android.os.Build
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import java.util.UUID
 
 /**
  * BLE manager for discovering and communicating with Phomemo printers.
@@ -40,6 +39,8 @@ class PhomemoBleManager(private val context: Context) {
     private var writeCharacteristic: BluetoothGattCharacteristic? = null
     private var scanner: BluetoothLeScanner? = null
     private var writeComplete = CompletableDeferred<Unit>()
+    private var scanTimeoutJob: Job? = null
+    private var negotiatedMtu: Int = 23  // BLE default MTU
 
     private val bluetoothAdapter: BluetoothAdapter?
         get() = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
@@ -65,7 +66,8 @@ class PhomemoBleManager(private val context: Context) {
 
         scanner?.startScan(listOf(scanFilter), scanSettings, scanCallback)
 
-        CoroutineScope(Dispatchers.Main).launch {
+        scanTimeoutJob?.cancel()
+        scanTimeoutJob = CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
             delay(durationMs)
             stopScan()
         }
@@ -73,6 +75,8 @@ class PhomemoBleManager(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun stopScan() {
+        scanTimeoutJob?.cancel()
+        scanTimeoutJob = null
         scanner?.stopScan(scanCallback)
         if (_state.value is ConnectionState.Scanning) {
             _state.value = ConnectionState.Disconnected
@@ -126,6 +130,9 @@ class PhomemoBleManager(private val context: Context) {
 
         @SuppressLint("MissingPermission")
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                negotiatedMtu = mtu
+            }
             // After MTU negotiation, discover services
             gatt.discoverServices()
         }
@@ -176,7 +183,8 @@ class PhomemoBleManager(private val context: Context) {
         val gatt = bluetoothGatt ?: throw IllegalStateException("Not connected")
         val char = writeCharacteristic ?: throw IllegalStateException("No writable characteristic")
 
-        val chunkSize = 512  // After MTU negotiation, use larger chunks
+        // Use negotiated MTU minus 3 bytes for ATT header
+        val chunkSize = (negotiatedMtu - 3).coerceIn(20, 512)
         val totalBytes = data.size
         var offset = 0
 
@@ -187,10 +195,22 @@ class PhomemoBleManager(private val context: Context) {
             val chunk = data.copyOfRange(offset, end)
 
             writeComplete = CompletableDeferred()
-            char.value = chunk
-            char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            if (!gatt.writeCharacteristic(char)) {
-                throw Exception("Failed to initiate write")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val result = gatt.writeCharacteristic(
+                    char, chunk, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                )
+                if (result != BluetoothStatusCodes.SUCCESS) {
+                    throw Exception("Failed to initiate write (code $result)")
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                char.value = chunk
+                @Suppress("DEPRECATION")
+                char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                @Suppress("DEPRECATION")
+                if (!gatt.writeCharacteristic(char)) {
+                    throw Exception("Failed to initiate write")
+                }
             }
 
             // Wait for write callback
@@ -221,10 +241,13 @@ class PhomemoBleManager(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun disconnect() {
+        scanTimeoutJob?.cancel()
+        scanTimeoutJob = null
         bluetoothGatt?.disconnect()
         bluetoothGatt?.close()
         bluetoothGatt = null
         writeCharacteristic = null
+        negotiatedMtu = 23
         _state.value = ConnectionState.Disconnected
     }
 }
