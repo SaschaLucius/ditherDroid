@@ -19,6 +19,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.ditherprint.app.ui.camera.CameraScreen
 import com.ditherprint.app.ui.editor.EditorScreen
 import com.ditherprint.app.ui.editor.EditorViewModel
 import com.ditherprint.app.ui.settings.PrinterSettingsScreen
@@ -86,13 +87,21 @@ fun DitherPrintNavigation(sharedImageUriFlow: MutableStateFlow<Uri?>) {
         composable("editor") {
             EditorScreen(
                 viewModel = viewModel,
-                onNavigateToSettings = { navController.navigate("settings") }
+                onNavigateToSettings = { navController.navigate("settings") },
+                onNavigateToCamera = { navController.navigate("camera") }
             )
         }
         composable("settings") {
             PrinterSettingsScreen(
                 viewModel = viewModel,
                 onBack = { navController.popBackStack() }
+            )
+        }
+        composable("camera") {
+            CameraScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() },
+                onCapture = { navController.popBackStack() }
             )
         }
     }

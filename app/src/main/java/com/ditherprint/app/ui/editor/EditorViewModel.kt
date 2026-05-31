@@ -147,6 +147,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun loadBitmap(bitmap: Bitmap) {
+        _rawBitmap.value = bitmap
+        _cropRect.value = RectF(0f, 0f, 1f, 1f)
+        _isCropping.value = false
+        applyCropAndResize()
+    }
+
     private fun applyCropAndResize() {
         val raw = _rawBitmap.value ?: return
         if (raw.isRecycled) return

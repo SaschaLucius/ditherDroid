@@ -37,7 +37,8 @@ import com.ditherprint.app.printer.PhomemoBleManager
 @Composable
 fun EditorScreen(
     viewModel: EditorViewModel,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    onNavigateToCamera: () -> Unit
 ) {
     val ditheredBitmap by viewModel.ditheredBitmap.collectAsState()
     val originalBitmap by viewModel.originalBitmap.collectAsState()
@@ -200,6 +201,12 @@ fun EditorScreen(
                             Spacer(Modifier.width(8.dp))
                             Text("Select Photo")
                         }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(onClick = onNavigateToCamera) {
+                            Icon(Icons.Default.CameraAlt, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Camera")
+                        }
                     }
                 }
             }
@@ -223,7 +230,8 @@ fun EditorScreen(
                         photoPicker.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                         )
-                    }
+                    },
+                    onCamera = onNavigateToCamera
                 )
             }
         }
@@ -472,7 +480,8 @@ private fun ControlsPanel(
     onInvertChange: (Boolean) -> Unit,
     onBayerSizeChange: (Int) -> Unit,
     onFavoriteSelect: (com.ditherprint.app.data.SettingsRepository.Favorite) -> Unit,
-    onPickPhoto: () -> Unit
+    onPickPhoto: () -> Unit,
+    onCamera: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -576,10 +585,17 @@ private fun ControlsPanel(
                 Checkbox(checked = invert, onCheckedChange = onInvertChange)
                 Text("Invert")
             }
-            TextButton(onClick = onPickPhoto) {
-                Icon(Icons.Default.PhotoLibrary, contentDescription = null)
-                Spacer(Modifier.width(4.dp))
-                Text("Change Photo")
+            Row {
+                TextButton(onClick = onCamera) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Camera")
+                }
+                TextButton(onClick = onPickPhoto) {
+                    Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Photo")
+                }
             }
         }
     }

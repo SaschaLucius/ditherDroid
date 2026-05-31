@@ -1,0 +1,335 @@
+package com.ditherprint.app.ui.camera
+
+import android.Manifest
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import com.ditherprint.app.dithering.DitherAlgorithm
+import com.ditherprint.app.dithering.DitherEngine
+import com.ditherprint.app.ui.editor.EditorViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asExecutor
+import java.util.concurrent.atomic.AtomicBoolean
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CameraScreen(
+    viewModel: EditorViewModel,
+    onBack: () -> Unit,
+    onCapture: () -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val algorithm by viewModel.algorithm.collectAsState()
+    val brightness by viewModel.brightness.collectAsState()
+    val contrast by viewModel.contrast.collectAsState()
+    val invert by viewModel.invert.collectAsState()
+    val bayerSize by viewModel.bayerSize.collectAsState()
+
+    var ditheredPreview by remember { mutableStateOf<Bitmap?>(null) }
+    var showDithered by remember { mutableStateOf(true) }
+    var hasCameraPermission by remember { mutableStateOf(false) }
+
+    // Permission check
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCameraPermission = granted
+    }
+
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.CAMERA
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            hasCameraPermission = true
+        } else {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Camera") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showDithered = !showDithered }) {
+                        Icon(
+                            if (showDithered) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = "Toggle dither preview"
+                        )
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = {
+                // Capture current dithered frame and send to editor
+                ditheredPreview?.let { bitmap ->
+                    viewModel.loadBitmap(bitmap.copy(Bitmap.Config.ARGB_8888, false))
+                    onCapture()
+                }
+            }) {
+                Icon(Icons.Default.CameraAlt, contentDescription = "Capture")
+            }
+        }
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!hasCameraPermission) {
+                Text("Camera permission required")
+            } else if (showDithered) {
+                // Show dithered preview
+                DitheredCameraPreview(
+                    algorithm = algorithm,
+                    brightness = brightness,
+                    contrast = contrast,
+                    invert = invert,
+                    bayerSize = bayerSize,
+                    onFrameDithered = { ditheredPreview = it }
+                )
+            } else {
+                // Show raw camera preview
+                RawCameraPreview(
+                    onFrameDithered = { ditheredPreview = it },
+                    algorithm = algorithm,
+                    brightness = brightness,
+                    contrast = contrast,
+                    invert = invert,
+                    bayerSize = bayerSize
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DitheredCameraPreview(
+    algorithm: DitherAlgorithm,
+    brightness: Float,
+    contrast: Float,
+    invert: Boolean,
+    bayerSize: Int,
+    onFrameDithered: (Bitmap) -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var displayBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val isProcessing = remember { AtomicBoolean(false) }
+
+    // Remember current dither params for use in analyzer
+    val currentAlgorithm by rememberUpdatedState(algorithm)
+    val currentBrightness by rememberUpdatedState(brightness)
+    val currentContrast by rememberUpdatedState(contrast)
+    val currentInvert by rememberUpdatedState(invert)
+    val currentBayerSize by rememberUpdatedState(bayerSize)
+
+    DisposableEffect(lifecycleOwner) {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        var cameraProvider: ProcessCameraProvider? = null
+
+        cameraProviderFuture.addListener({
+            cameraProvider = cameraProviderFuture.get()
+            val provider = cameraProvider ?: return@addListener
+
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                .build()
+
+            imageAnalysis.setAnalyzer(Dispatchers.Default.asExecutor()) { imageProxy ->
+                if (!isProcessing.compareAndSet(false, true)) {
+                    imageProxy.close()
+                    return@setAnalyzer
+                }
+
+                val bitmap = imageProxyToBitmap(imageProxy)
+                imageProxy.close()
+
+                if (bitmap != null) {
+                    // Downscale for performance
+                    val targetWidth = 280
+                    val aspect = bitmap.height.toFloat() / bitmap.width.toFloat()
+                    val targetHeight = (targetWidth * aspect).toInt()
+                    val scaled = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
+                    if (scaled !== bitmap) bitmap.recycle()
+
+                    val dithered = DitherEngine.process(
+                        source = scaled,
+                        algorithm = currentAlgorithm,
+                        brightness = currentBrightness,
+                        contrast = currentContrast,
+                        invert = currentInvert,
+                        bayerSize = currentBayerSize
+                    )
+                    scaled.recycle()
+
+                    displayBitmap = dithered
+                    onFrameDithered(dithered)
+                }
+                isProcessing.set(false)
+            }
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            try {
+                provider.unbindAll()
+                provider.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalysis)
+            } catch (_: Exception) {}
+        }, ContextCompat.getMainExecutor(context))
+
+        onDispose {
+            cameraProvider?.unbindAll()
+        }
+    }
+
+    displayBitmap?.let { bmp ->
+        Image(
+            bitmap = bmp.asImageBitmap(),
+            contentDescription = "Dithered camera preview",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit,
+            filterQuality = FilterQuality.None
+        )
+    }
+}
+
+@Composable
+private fun RawCameraPreview(
+    onFrameDithered: (Bitmap) -> Unit,
+    algorithm: DitherAlgorithm,
+    brightness: Float,
+    contrast: Float,
+    invert: Boolean,
+    bayerSize: Int
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val isProcessing = remember { AtomicBoolean(false) }
+
+    val currentAlgorithm by rememberUpdatedState(algorithm)
+    val currentBrightness by rememberUpdatedState(brightness)
+    val currentContrast by rememberUpdatedState(contrast)
+    val currentInvert by rememberUpdatedState(invert)
+    val currentBayerSize by rememberUpdatedState(bayerSize)
+
+    AndroidView(
+        factory = { ctx ->
+            val previewView = PreviewView(ctx)
+
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+            cameraProviderFuture.addListener({
+                val cameraProvider = cameraProviderFuture.get()
+
+                val preview = Preview.Builder().build().also {
+                    it.surfaceProvider = previewView.surfaceProvider
+                }
+
+                val imageAnalysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                    .build()
+
+                // Still dither in background so capture button has a frame ready
+                imageAnalysis.setAnalyzer(Dispatchers.Default.asExecutor()) { imageProxy ->
+                    if (!isProcessing.compareAndSet(false, true)) {
+                        imageProxy.close()
+                        return@setAnalyzer
+                    }
+
+                    val bitmap = imageProxyToBitmap(imageProxy)
+                    imageProxy.close()
+
+                    if (bitmap != null) {
+                        val targetWidth = 280
+                        val aspect = bitmap.height.toFloat() / bitmap.width.toFloat()
+                        val targetHeight = (targetWidth * aspect).toInt()
+                        val scaled = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
+                        if (scaled !== bitmap) bitmap.recycle()
+
+                        val dithered = DitherEngine.process(
+                            source = scaled,
+                            algorithm = currentAlgorithm,
+                            brightness = currentBrightness,
+                            contrast = currentContrast,
+                            invert = currentInvert,
+                            bayerSize = currentBayerSize
+                        )
+                        scaled.recycle()
+                        onFrameDithered(dithered)
+                    }
+                    isProcessing.set(false)
+                }
+
+                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                try {
+                    cameraProvider.unbindAll()
+                    cameraProvider.bindToLifecycle(
+                        lifecycleOwner, cameraSelector, preview, imageAnalysis
+                    )
+                } catch (_: Exception) {}
+            }, ContextCompat.getMainExecutor(ctx))
+
+            previewView
+        },
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
+private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
+    val plane = imageProxy.planes.firstOrNull() ?: return null
+    val buffer = plane.buffer
+    val width = imageProxy.width
+    val height = imageProxy.height
+
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    buffer.rewind()
+    bitmap.copyPixelsFromBuffer(buffer)
+
+    // Apply rotation
+    val rotation = imageProxy.imageInfo.rotationDegrees
+    if (rotation != 0) {
+        val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+        val rotated = Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true)
+        if (rotated !== bitmap) bitmap.recycle()
+        return rotated
+    }
+    return bitmap
+}
