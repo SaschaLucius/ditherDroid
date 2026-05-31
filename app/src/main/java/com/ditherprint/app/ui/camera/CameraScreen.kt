@@ -105,36 +105,148 @@ fun CameraScreen(
             }
         }
     ) { padding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center
         ) {
-            if (!hasCameraPermission) {
-                Text("Camera permission required")
-            } else if (showDithered) {
-                // Show dithered preview
-                DitheredCameraPreview(
-                    algorithm = algorithm,
-                    brightness = brightness,
-                    contrast = contrast,
-                    invert = invert,
-                    bayerSize = bayerSize,
-                    onFrameDithered = { ditheredPreview = it }
-                )
-            } else {
-                // Show raw camera preview
-                RawCameraPreview(
-                    onFrameDithered = { ditheredPreview = it },
-                    algorithm = algorithm,
-                    brightness = brightness,
-                    contrast = contrast,
-                    invert = invert,
-                    bayerSize = bayerSize
-                )
+            // Camera preview area
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!hasCameraPermission) {
+                    Text("Camera permission required")
+                } else if (showDithered) {
+                    DitheredCameraPreview(
+                        algorithm = algorithm,
+                        brightness = brightness,
+                        contrast = contrast,
+                        invert = invert,
+                        bayerSize = bayerSize,
+                        onFrameDithered = { ditheredPreview = it }
+                    )
+                } else {
+                    RawCameraPreview(
+                        onFrameDithered = { ditheredPreview = it },
+                        algorithm = algorithm,
+                        brightness = brightness,
+                        contrast = contrast,
+                        invert = invert,
+                        bayerSize = bayerSize
+                    )
+                }
             }
+
+            // Controls panel
+            CameraControlsPanel(
+                algorithm = algorithm,
+                brightness = brightness,
+                contrast = contrast,
+                invert = invert,
+                bayerSize = bayerSize,
+                onAlgorithmChange = viewModel::setAlgorithm,
+                onBrightnessChange = viewModel::setBrightness,
+                onContrastChange = viewModel::setContrast,
+                onInvertChange = viewModel::setInvert,
+                onBayerSizeChange = viewModel::setBayerSize
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CameraControlsPanel(
+    algorithm: DitherAlgorithm,
+    brightness: Float,
+    contrast: Float,
+    invert: Boolean,
+    bayerSize: Int,
+    onAlgorithmChange: (DitherAlgorithm) -> Unit,
+    onBrightnessChange: (Float) -> Unit,
+    onContrastChange: (Float) -> Unit,
+    onInvertChange: (Boolean) -> Unit,
+    onBayerSizeChange: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        // Algorithm dropdown
+        var expanded by remember { mutableStateOf(false) }
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it }
+        ) {
+            OutlinedTextField(
+                value = algorithm.displayName,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Algorithm") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor()
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                DitherAlgorithm.entries.forEach { alg ->
+                    DropdownMenuItem(
+                        text = { Text(alg.displayName) },
+                        onClick = {
+                            onAlgorithmChange(alg)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        // Bayer size (only for Bayer algorithm)
+        if (algorithm == DitherAlgorithm.BAYER) {
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(2, 4, 8, 16).forEach { size ->
+                    FilterChip(
+                        selected = bayerSize == size,
+                        onClick = { onBayerSizeChange(size) },
+                        label = { Text("${size}x${size}") }
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        // Brightness
+        Text("Brightness: ${"%.2f".format(brightness)}", style = MaterialTheme.typography.labelMedium)
+        Slider(
+            value = brightness,
+            onValueChange = onBrightnessChange,
+            valueRange = -1f..1f,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // Contrast
+        Text("Contrast: ${"%.2f".format(contrast)}", style = MaterialTheme.typography.labelMedium)
+        Slider(
+            value = contrast,
+            onValueChange = onContrastChange,
+            valueRange = 0f..2f,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // Invert
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = invert, onCheckedChange = onInvertChange)
+            Text("Invert")
         }
     }
 }
