@@ -112,6 +112,16 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        // Auto-connect to last known printer
+        viewModelScope.launch {
+            settingsRepo.printerSettings.first().let { settings ->
+                val mac = settings.lastPrinterMac
+                if (!mac.isNullOrBlank()) {
+                    bleManager.connectByAddress(mac)
+                }
+            }
+        }
+
         // Auto-re-dither when parameters change (debounced)
         viewModelScope.launch {
             combine(
