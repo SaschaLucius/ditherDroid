@@ -41,6 +41,7 @@ fun EditorScreen(
 ) {
     val ditheredBitmap by viewModel.ditheredBitmap.collectAsState()
     val originalBitmap by viewModel.originalBitmap.collectAsState()
+    val rawBitmap by viewModel.rawBitmap.collectAsState()
     val showOriginal by viewModel.showOriginal.collectAsState()
     val algorithm by viewModel.algorithm.collectAsState()
     val brightness by viewModel.brightness.collectAsState()
@@ -147,9 +148,9 @@ fun EditorScreen(
                 contentAlignment = Alignment.Center
             ) {
                 val bitmapToShow = if (showOriginal) originalBitmap else (ditheredBitmap ?: originalBitmap)
-                if (isCropping && originalBitmap != null) {
+                if (isCropping && rawBitmap != null) {
                     CroppableImage(
-                        bitmap = originalBitmap!!,
+                        bitmap = rawBitmap!!,
                         cropRect = cropRect,
                         onCropRectChange = { viewModel.updateCropRect(it) },
                         modifier = Modifier.fillMaxSize()

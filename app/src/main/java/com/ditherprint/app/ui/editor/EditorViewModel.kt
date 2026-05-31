@@ -46,6 +46,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     // Image state
     private val _rawBitmap = MutableStateFlow<Bitmap?>(null)
+    val rawBitmap: StateFlow<Bitmap?> = _rawBitmap
 
     private val _originalBitmap = MutableStateFlow<Bitmap?>(null)
     val originalBitmap: StateFlow<Bitmap?> = _originalBitmap
