@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -315,63 +316,83 @@ private fun CroppableImage(
         )
 
         // Crop overlay
+        val currentCropRect by rememberUpdatedState(cropRect)
+
+        // Which edge/corner is being dragged; locked at drag-start so recomposition doesn't break it
+        var activeEdge by remember { mutableStateOf("") }
+
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(cropRect) {
+                .pointerInput(Unit) {
                     val handleTouchRadius = 48f
-                    detectDragGestures { change, dragAmount ->
+                    detectDragGestures(
+                        onDragStart = { touchPos ->
+                            val imgRect = imageRect()
+                            if (imgRect == Rect.Zero) return@detectDragGestures
+                            val imgW = imgRect.width
+                            val imgH = imgRect.height
+                            val cr = currentCropRect
+                            val cropL = imgRect.left + cr.left * imgW
+                            val cropT = imgRect.top + cr.top * imgH
+                            val cropR = imgRect.left + cr.right * imgW
+                            val cropB = imgRect.top + cr.bottom * imgH
+
+                            val nearLeft = kotlin.math.abs(touchPos.x - cropL) < handleTouchRadius
+                            val nearRight = kotlin.math.abs(touchPos.x - cropR) < handleTouchRadius
+                            val nearTop = kotlin.math.abs(touchPos.y - cropT) < handleTouchRadius
+                            val nearBottom = kotlin.math.abs(touchPos.y - cropB) < handleTouchRadius
+
+                            activeEdge = when {
+                                nearLeft && nearTop -> "TL"
+                                nearRight && nearTop -> "TR"
+                                nearLeft && nearBottom -> "BL"
+                                nearRight && nearBottom -> "BR"
+                                nearLeft -> "L"
+                                nearRight -> "R"
+                                nearTop -> "T"
+                                nearBottom -> "B"
+                                touchPos.x in cropL..cropR && touchPos.y in cropT..cropB -> "MOVE"
+                                else -> ""
+                            }
+                        },
+                        onDragEnd = { activeEdge = "" },
+                        onDragCancel = { activeEdge = "" }
+                    ) { change, dragAmount ->
                         change.consume()
+                        if (activeEdge.isEmpty()) return@detectDragGestures
                         val imgRect = imageRect()
                         if (imgRect == Rect.Zero) return@detectDragGestures
                         val imgW = imgRect.width
                         val imgH = imgRect.height
-
-                        // Normalize drag to 0..1 crop space
                         val dx = dragAmount.x / imgW
                         val dy = dragAmount.y / imgH
-
-                        // Determine which edge/corner to drag based on touch position
-                        val touchX = change.position.x
-                        val touchY = change.position.y
-                        val cropL = imgRect.left + cropRect.left * imgW
-                        val cropT = imgRect.top + cropRect.top * imgH
-                        val cropR = imgRect.left + cropRect.right * imgW
-                        val cropB = imgRect.top + cropRect.bottom * imgH
-
-                        val nearLeft = kotlin.math.abs(touchX - cropL) < handleTouchRadius
-                        val nearRight = kotlin.math.abs(touchX - cropR) < handleTouchRadius
-                        val nearTop = kotlin.math.abs(touchY - cropT) < handleTouchRadius
-                        val nearBottom = kotlin.math.abs(touchY - cropB) < handleTouchRadius
-                        val insideX = touchX in cropL..cropR
-                        val insideY = touchY in cropT..cropB
-
-                        val newRect = RectF(cropRect.left, cropRect.top, cropRect.right, cropRect.bottom)
+                        val cr = currentCropRect
+                        val newRect = RectF(cr.left, cr.top, cr.right, cr.bottom)
                         val minSize = 0.05f
 
-                        when {
-                            nearLeft && nearTop -> {
+                        when (activeEdge) {
+                            "TL" -> {
                                 newRect.left = (newRect.left + dx).coerceIn(0f, newRect.right - minSize)
                                 newRect.top = (newRect.top + dy).coerceIn(0f, newRect.bottom - minSize)
                             }
-                            nearRight && nearTop -> {
+                            "TR" -> {
                                 newRect.right = (newRect.right + dx).coerceIn(newRect.left + minSize, 1f)
                                 newRect.top = (newRect.top + dy).coerceIn(0f, newRect.bottom - minSize)
                             }
-                            nearLeft && nearBottom -> {
+                            "BL" -> {
                                 newRect.left = (newRect.left + dx).coerceIn(0f, newRect.right - minSize)
                                 newRect.bottom = (newRect.bottom + dy).coerceIn(newRect.top + minSize, 1f)
                             }
-                            nearRight && nearBottom -> {
+                            "BR" -> {
                                 newRect.right = (newRect.right + dx).coerceIn(newRect.left + minSize, 1f)
                                 newRect.bottom = (newRect.bottom + dy).coerceIn(newRect.top + minSize, 1f)
                             }
-                            nearLeft -> newRect.left = (newRect.left + dx).coerceIn(0f, newRect.right - minSize)
-                            nearRight -> newRect.right = (newRect.right + dx).coerceIn(newRect.left + minSize, 1f)
-                            nearTop -> newRect.top = (newRect.top + dy).coerceIn(0f, newRect.bottom - minSize)
-                            nearBottom -> newRect.bottom = (newRect.bottom + dy).coerceIn(newRect.top + minSize, 1f)
-                            insideX && insideY -> {
-                                // Move entire rect
+                            "L" -> newRect.left = (newRect.left + dx).coerceIn(0f, newRect.right - minSize)
+                            "R" -> newRect.right = (newRect.right + dx).coerceIn(newRect.left + minSize, 1f)
+                            "T" -> newRect.top = (newRect.top + dy).coerceIn(0f, newRect.bottom - minSize)
+                            "B" -> newRect.bottom = (newRect.bottom + dy).coerceIn(newRect.top + minSize, 1f)
+                            "MOVE" -> {
                                 val w = newRect.width()
                                 val h = newRect.height()
                                 newRect.left = (newRect.left + dx).coerceIn(0f, 1f - w)
