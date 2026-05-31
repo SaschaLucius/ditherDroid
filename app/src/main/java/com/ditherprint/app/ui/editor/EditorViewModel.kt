@@ -172,11 +172,21 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun resizeForPrinter(bitmap: Bitmap, targetWidth: Int): Bitmap {
-        val aspect = bitmap.height.toFloat() / bitmap.width.toFloat()
+        // Auto-rotate landscape images to maximize print size
+        val oriented = if (bitmap.width > bitmap.height) {
+            val matrix = android.graphics.Matrix()
+            matrix.postRotate(90f)
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        } else {
+            bitmap
+        }
+
+        val aspect = oriented.height.toFloat() / oriented.width.toFloat()
         val targetHeight = (targetWidth * aspect).toInt()
 
         // Resize to printer width
-        val resized = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
+        val resized = Bitmap.createScaledBitmap(oriented, targetWidth, targetHeight, true)
+        if (oriented !== bitmap && oriented !== resized) oriented.recycle()
 
         // If narrower than full printer width, center on white background
         if (targetWidth < PhomemoProtocol.IMAGE_WIDTH) {

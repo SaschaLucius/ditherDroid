@@ -30,6 +30,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
 import com.ditherprint.app.dithering.DitherAlgorithm
 import com.ditherprint.app.printer.PhomemoBleManager
 
@@ -290,26 +291,30 @@ private fun CroppableImage(
     val borderColor = Color.White
     val handleRadius = 12.dp
 
-    // Compute the image bounds within the container (ContentScale.Fit)
+    // Inset so crop handles at edges remain touchable
+    val cropPadding = 24.dp
+    val density = LocalDensity.current
+    val padPx = with(density) { cropPadding.toPx() }
+
+    // Compute the image bounds within the container (with padding for handles)
     fun imageRect(): Rect {
         if (containerSize == IntSize.Zero) return Rect.Zero
-        val containerW = containerSize.width.toFloat()
-        val containerH = containerSize.height.toFloat()
+        val containerW = containerSize.width.toFloat() - padPx * 2
+        val containerH = containerSize.height.toFloat() - padPx * 2
+        if (containerW <= 0 || containerH <= 0) return Rect.Zero
         val bitmapAspect = bitmap.width.toFloat() / bitmap.height.toFloat()
         val containerAspect = containerW / containerH
 
         return if (bitmapAspect > containerAspect) {
-            // Image wider than container → fit width
             val drawW = containerW
             val drawH = containerW / bitmapAspect
-            val top = (containerH - drawH) / 2f
-            Rect(0f, top, drawW, top + drawH)
+            val top = padPx + (containerH - drawH) / 2f
+            Rect(padPx, top, padPx + drawW, top + drawH)
         } else {
-            // Image taller → fit height
             val drawH = containerH
             val drawW = containerH * bitmapAspect
-            val left = (containerW - drawW) / 2f
-            Rect(left, 0f, left + drawW, drawH)
+            val left = padPx + (containerW - drawW) / 2f
+            Rect(left, padPx, left + drawW, padPx + drawH)
         }
     }
 
@@ -319,7 +324,9 @@ private fun CroppableImage(
         Image(
             bitmap = bitmap.asImageBitmap(),
             contentDescription = "Crop preview",
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(cropPadding),
             contentScale = ContentScale.Fit,
             filterQuality = FilterQuality.None
         )
