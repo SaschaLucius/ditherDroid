@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.RectF
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
@@ -41,6 +42,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     val bayerSize: StateFlow<Int> = _bayerSize
 
     // Image state
+    private val _rawBitmap = MutableStateFlow<Bitmap?>(null)
+
     private val _originalBitmap = MutableStateFlow<Bitmap?>(null)
     val originalBitmap: StateFlow<Bitmap?> = _originalBitmap
 
@@ -49,6 +52,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _showOriginal = MutableStateFlow(false)
     val showOriginal: StateFlow<Boolean> = _showOriginal
+
+    // Crop state (normalized 0..1 rect)
+    private val _isCropping = MutableStateFlow(false)
+    val isCropping: StateFlow<Boolean> = _isCropping
+
+    private val _cropRect = MutableStateFlow(RectF(0f, 0f, 1f, 1f))
+    val cropRect: StateFlow<RectF> = _cropRect
 
     // Printer state
     private val _isPrinting = MutableStateFlow(false)
@@ -105,14 +115,30 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 inputStream.close()
 
                 if (bitmap != null) {
-                    val paperSize = printerSettings.value.paperSize
-                    val resized = resizeForPrinter(bitmap, paperSize.widthPx)
-                    _originalBitmap.value = resized
+                    _rawBitmap.value = bitmap
+                    _cropRect.value = RectF(0f, 0f, 1f, 1f)
+                    _isCropping.value = false
+                    applyCropAndResize()
                 }
             } catch (e: Exception) {
                 _printError.value = "Failed to load image: ${e.message}"
             }
         }
+    }
+
+    private fun applyCropAndResize() {
+        val raw = _rawBitmap.value ?: return
+        val crop = _cropRect.value
+        val paperSize = printerSettings.value.paperSize
+
+        val x = (crop.left * raw.width).toInt().coerceIn(0, raw.width - 1)
+        val y = (crop.top * raw.height).toInt().coerceIn(0, raw.height - 1)
+        val w = ((crop.right - crop.left) * raw.width).toInt().coerceIn(1, raw.width - x)
+        val h = ((crop.bottom - crop.top) * raw.height).toInt().coerceIn(1, raw.height - y)
+
+        val cropped = Bitmap.createBitmap(raw, x, y, w, h)
+        val resized = resizeForPrinter(cropped, paperSize.widthPx)
+        _originalBitmap.value = resized
     }
 
     private fun resizeForPrinter(bitmap: Bitmap, targetWidth: Int): Bitmap {
@@ -164,6 +190,27 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun showSaveFavoriteDialog() { _showSaveFavoriteDialog.value = true }
     fun dismissSaveFavoriteDialog() { _showSaveFavoriteDialog.value = false }
     fun clearPrintError() { _printError.value = null }
+
+    fun toggleCropMode() { _isCropping.value = !_isCropping.value }
+
+    fun updateCropRect(rect: RectF) {
+        _cropRect.value = rect
+    }
+
+    fun applyCrop() {
+        _isCropping.value = false
+        viewModelScope.launch(Dispatchers.Default) {
+            applyCropAndResize()
+        }
+    }
+
+    fun resetCrop() {
+        _cropRect.value = RectF(0f, 0f, 1f, 1f)
+        _isCropping.value = false
+        viewModelScope.launch(Dispatchers.Default) {
+            applyCropAndResize()
+        }
+    }
 
     fun applyFavorite(fav: SettingsRepository.Favorite) {
         _algorithm.value = fav.settings.algorithm

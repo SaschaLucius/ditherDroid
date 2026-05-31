@@ -1,10 +1,12 @@
 package com.ditherprint.app.ui.editor
 
 import android.graphics.Bitmap
+import android.graphics.RectF
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -15,11 +17,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.ditherprint.app.dithering.DitherAlgorithm
 import com.ditherprint.app.printer.PhomemoBleManager
@@ -44,6 +52,8 @@ fun EditorScreen(
     val printProgress by viewModel.bleManager.printProgress.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
     val showSaveDialog by viewModel.showSaveFavoriteDialog.collectAsState()
+    val isCropping by viewModel.isCropping.collectAsState()
+    val cropRect by viewModel.cropRect.collectAsState()
 
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -66,6 +76,20 @@ fun EditorScreen(
             TopAppBar(
                 title = { Text("DitherPrint") },
                 actions = {
+                    if (originalBitmap != null) {
+                        if (isCropping) {
+                            IconButton(onClick = { viewModel.applyCrop() }) {
+                                Icon(Icons.Default.Check, contentDescription = "Apply crop")
+                            }
+                            IconButton(onClick = { viewModel.resetCrop() }) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel crop")
+                            }
+                        } else {
+                            IconButton(onClick = { viewModel.toggleCropMode() }) {
+                                Icon(Icons.Default.Crop, contentDescription = "Crop")
+                            }
+                        }
+                    }
                     IconButton(onClick = { viewModel.saveToGallery() }) {
                         Icon(Icons.Default.Save, contentDescription = "Save to gallery")
                     }
@@ -122,7 +146,21 @@ fun EditorScreen(
                 contentAlignment = Alignment.Center
             ) {
                 val bitmapToShow = if (showOriginal) originalBitmap else ditheredBitmap
-                if (bitmapToShow != null) {
+                if (isCropping && originalBitmap != null) {
+                    CroppableImage(
+                        bitmap = originalBitmap!!,
+                        cropRect = cropRect,
+                        onCropRectChange = { viewModel.updateCropRect(it) },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Badge(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp)
+                    ) {
+                        Text("Crop", modifier = Modifier.padding(horizontal = 4.dp))
+                    }
+                } else if (bitmapToShow != null) {
                     ZoomableImage(
                         bitmap = bitmapToShow,
                         modifier = Modifier.fillMaxSize(),
@@ -227,6 +265,174 @@ private fun ZoomableImage(
         contentScale = ContentScale.Fit,
         filterQuality = FilterQuality.None  // Keep pixel-sharp for dithered preview
     )
+}
+
+@Composable
+private fun CroppableImage(
+    bitmap: Bitmap,
+    cropRect: RectF,
+    onCropRectChange: (RectF) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    val scrimColor = Color.Black.copy(alpha = 0.5f)
+    val handleColor = Color.White
+    val borderColor = Color.White
+    val handleRadius = 12.dp
+
+    // Compute the image bounds within the container (ContentScale.Fit)
+    fun imageRect(): Rect {
+        if (containerSize == IntSize.Zero) return Rect.Zero
+        val containerW = containerSize.width.toFloat()
+        val containerH = containerSize.height.toFloat()
+        val bitmapAspect = bitmap.width.toFloat() / bitmap.height.toFloat()
+        val containerAspect = containerW / containerH
+
+        return if (bitmapAspect > containerAspect) {
+            // Image wider than container → fit width
+            val drawW = containerW
+            val drawH = containerW / bitmapAspect
+            val top = (containerH - drawH) / 2f
+            Rect(0f, top, drawW, top + drawH)
+        } else {
+            // Image taller → fit height
+            val drawH = containerH
+            val drawW = containerH * bitmapAspect
+            val left = (containerW - drawW) / 2f
+            Rect(left, 0f, left + drawW, drawH)
+        }
+    }
+
+    Box(
+        modifier = modifier.onSizeChanged { containerSize = it }
+    ) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = "Crop preview",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit,
+            filterQuality = FilterQuality.None
+        )
+
+        // Crop overlay
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(cropRect) {
+                    val handleTouchRadius = 48f
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        val imgRect = imageRect()
+                        if (imgRect == Rect.Zero) return@detectDragGestures
+                        val imgW = imgRect.width
+                        val imgH = imgRect.height
+
+                        // Normalize drag to 0..1 crop space
+                        val dx = dragAmount.x / imgW
+                        val dy = dragAmount.y / imgH
+
+                        // Determine which edge/corner to drag based on touch position
+                        val touchX = change.position.x
+                        val touchY = change.position.y
+                        val cropL = imgRect.left + cropRect.left * imgW
+                        val cropT = imgRect.top + cropRect.top * imgH
+                        val cropR = imgRect.left + cropRect.right * imgW
+                        val cropB = imgRect.top + cropRect.bottom * imgH
+
+                        val nearLeft = kotlin.math.abs(touchX - cropL) < handleTouchRadius
+                        val nearRight = kotlin.math.abs(touchX - cropR) < handleTouchRadius
+                        val nearTop = kotlin.math.abs(touchY - cropT) < handleTouchRadius
+                        val nearBottom = kotlin.math.abs(touchY - cropB) < handleTouchRadius
+                        val insideX = touchX in cropL..cropR
+                        val insideY = touchY in cropT..cropB
+
+                        val newRect = RectF(cropRect.left, cropRect.top, cropRect.right, cropRect.bottom)
+                        val minSize = 0.05f
+
+                        when {
+                            nearLeft && nearTop -> {
+                                newRect.left = (newRect.left + dx).coerceIn(0f, newRect.right - minSize)
+                                newRect.top = (newRect.top + dy).coerceIn(0f, newRect.bottom - minSize)
+                            }
+                            nearRight && nearTop -> {
+                                newRect.right = (newRect.right + dx).coerceIn(newRect.left + minSize, 1f)
+                                newRect.top = (newRect.top + dy).coerceIn(0f, newRect.bottom - minSize)
+                            }
+                            nearLeft && nearBottom -> {
+                                newRect.left = (newRect.left + dx).coerceIn(0f, newRect.right - minSize)
+                                newRect.bottom = (newRect.bottom + dy).coerceIn(newRect.top + minSize, 1f)
+                            }
+                            nearRight && nearBottom -> {
+                                newRect.right = (newRect.right + dx).coerceIn(newRect.left + minSize, 1f)
+                                newRect.bottom = (newRect.bottom + dy).coerceIn(newRect.top + minSize, 1f)
+                            }
+                            nearLeft -> newRect.left = (newRect.left + dx).coerceIn(0f, newRect.right - minSize)
+                            nearRight -> newRect.right = (newRect.right + dx).coerceIn(newRect.left + minSize, 1f)
+                            nearTop -> newRect.top = (newRect.top + dy).coerceIn(0f, newRect.bottom - minSize)
+                            nearBottom -> newRect.bottom = (newRect.bottom + dy).coerceIn(newRect.top + minSize, 1f)
+                            insideX && insideY -> {
+                                // Move entire rect
+                                val w = newRect.width()
+                                val h = newRect.height()
+                                newRect.left = (newRect.left + dx).coerceIn(0f, 1f - w)
+                                newRect.top = (newRect.top + dy).coerceIn(0f, 1f - h)
+                                newRect.right = newRect.left + w
+                                newRect.bottom = newRect.top + h
+                            }
+                        }
+                        onCropRectChange(newRect)
+                    }
+                }
+        ) {
+            val imgRect = imageRect()
+            if (imgRect == Rect.Zero) return@Canvas
+            val imgW = imgRect.width
+            val imgH = imgRect.height
+
+            val cropL = imgRect.left + cropRect.left * imgW
+            val cropT = imgRect.top + cropRect.top * imgH
+            val cropR = imgRect.left + cropRect.right * imgW
+            val cropB = imgRect.top + cropRect.bottom * imgH
+
+            // Draw scrim outside crop area
+            // Top
+            drawRect(scrimColor, Offset(imgRect.left, imgRect.top), Size(imgW, cropT - imgRect.top))
+            // Bottom
+            drawRect(scrimColor, Offset(imgRect.left, cropB), Size(imgW, imgRect.bottom - cropB))
+            // Left
+            drawRect(scrimColor, Offset(imgRect.left, cropT), Size(cropL - imgRect.left, cropB - cropT))
+            // Right
+            drawRect(scrimColor, Offset(cropR, cropT), Size(imgRect.right - cropR, cropB - cropT))
+
+            // Draw crop border
+            drawRect(
+                borderColor,
+                Offset(cropL, cropT),
+                Size(cropR - cropL, cropB - cropT),
+                style = Stroke(width = 2.dp.toPx())
+            )
+
+            // Draw rule-of-thirds lines
+            val thirdW = (cropR - cropL) / 3f
+            val thirdH = (cropB - cropT) / 3f
+            val guideColor = Color.White.copy(alpha = 0.3f)
+            for (i in 1..2) {
+                drawLine(guideColor, Offset(cropL + thirdW * i, cropT), Offset(cropL + thirdW * i, cropB), strokeWidth = 1.dp.toPx())
+                drawLine(guideColor, Offset(cropL, cropT + thirdH * i), Offset(cropR, cropT + thirdH * i), strokeWidth = 1.dp.toPx())
+            }
+
+            // Draw corner handles
+            val hr = handleRadius.toPx()
+            val corners = listOf(
+                Offset(cropL, cropT), Offset(cropR, cropT),
+                Offset(cropL, cropB), Offset(cropR, cropB)
+            )
+            corners.forEach { center ->
+                drawCircle(handleColor, hr, center)
+                drawCircle(Color.Black, hr, center, style = Stroke(width = 1.5.dp.toPx()))
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
