@@ -32,6 +32,9 @@ class PhomemoBleManager(private val context: Context) {
     private val _discoveredDevices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
     val discoveredDevices: StateFlow<List<BluetoothDevice>> = _discoveredDevices.asStateFlow()
 
+    private val _bondedDevices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
+    val bondedDevices: StateFlow<List<BluetoothDevice>> = _bondedDevices.asStateFlow()
+
     private val _printProgress = MutableStateFlow<PrintProgress?>(null)
     val printProgress: StateFlow<PrintProgress?> = _printProgress.asStateFlow()
 
@@ -46,6 +49,13 @@ class PhomemoBleManager(private val context: Context) {
         get() = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
 
     @SuppressLint("MissingPermission")
+    fun loadBondedDevices() {
+        val adapter = bluetoothAdapter ?: return
+        val bonded = adapter.bondedDevices?.toList() ?: emptyList()
+        _bondedDevices.value = bonded
+    }
+
+    @SuppressLint("MissingPermission")
     fun startScan(durationMs: Long = 8000) {
         val adapter = bluetoothAdapter ?: run {
             _state.value = ConnectionState.Error("Bluetooth not available")
@@ -56,6 +66,7 @@ class PhomemoBleManager(private val context: Context) {
             return
         }
 
+        loadBondedDevices()
         _discoveredDevices.value = emptyList()
         _state.value = ConnectionState.Scanning
 
@@ -88,10 +99,11 @@ class PhomemoBleManager(private val context: Context) {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             val name = device.name ?: return
-            // Only show devices that look like Phomemo printers
-            if (!name.startsWith("M0", ignoreCase = true) &&
+            // Show devices that look like Phomemo/thermal printers
+            if (!name.startsWith("M", ignoreCase = true) &&
                 !name.contains("phomemo", ignoreCase = true) &&
-                !name.startsWith("T0", ignoreCase = true)
+                !name.startsWith("T0", ignoreCase = true) &&
+                !name.contains("printer", ignoreCase = true)
             ) return
 
             val current = _discoveredDevices.value
@@ -107,6 +119,23 @@ class PhomemoBleManager(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun connect(device: BluetoothDevice) {
+        stopScan()
+        _state.value = ConnectionState.Connecting
+        bluetoothGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun connectByAddress(macAddress: String) {
+        val adapter = bluetoothAdapter ?: run {
+            _state.value = ConnectionState.Error("Bluetooth not available")
+            return
+        }
+        val device = try {
+            adapter.getRemoteDevice(macAddress)
+        } catch (e: IllegalArgumentException) {
+            _state.value = ConnectionState.Error("Invalid MAC address")
+            return
+        }
         stopScan()
         _state.value = ConnectionState.Connecting
         bluetoothGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)

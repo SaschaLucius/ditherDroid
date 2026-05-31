@@ -28,12 +28,19 @@ import com.ditherprint.app.ui.editor.EditorViewModel
 @Composable
 fun PrinterSettingsScreen(
     viewModel: EditorViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onScanQr: () -> Unit = {}
 ) {
     val connectionState by viewModel.bleManager.state.collectAsState()
     val discoveredDevices by viewModel.bleManager.discoveredDevices.collectAsState()
+    val bondedDevices by viewModel.bleManager.bondedDevices.collectAsState()
     val printerSettings by viewModel.printerSettings.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
+
+    // Load bonded devices on screen entry
+    LaunchedEffect(Unit) {
+        viewModel.bleManager.loadBondedDevices()
+    }
 
     val context = LocalContext.current
     val blePermissions = remember {
@@ -128,20 +135,44 @@ fun PrinterSettingsScreen(
                                         Text("Disconnect")
                                     }
                                 }
-                                is PhomemoBleManager.ConnectionState.Scanning -> {
+                                is PhomemoBleManager.ConnectionState.Scanning,
+                                is PhomemoBleManager.ConnectionState.Connecting -> {
                                     CircularProgressIndicator(modifier = Modifier.size(24.dp))
                                 }
                                 else -> {
-                                    Button(onClick = {
-                                        if (permissionsGranted) {
-                                            viewModel.bleManager.startScan()
-                                        } else {
-                                            permissionLauncher.launch(blePermissions)
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        // Direct reconnect if we have a saved MAC
+                                        if (printerSettings.lastPrinterMac != null) {
+                                            Button(onClick = {
+                                                if (permissionsGranted) {
+                                                    viewModel.bleManager.connectByAddress(printerSettings.lastPrinterMac!!)
+                                                } else {
+                                                    permissionLauncher.launch(blePermissions)
+                                                }
+                                            }) {
+                                                Icon(Icons.Default.BluetoothConnected, contentDescription = null)
+                                                Spacer(Modifier.width(4.dp))
+                                                Text("Reconnect")
+                                            }
+                                            Spacer(Modifier.height(4.dp))
                                         }
-                                    }) {
-                                        Icon(Icons.Default.BluetoothSearching, contentDescription = null)
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("Scan")
+                                        OutlinedButton(onClick = {
+                                            if (permissionsGranted) {
+                                                viewModel.bleManager.startScan()
+                                            } else {
+                                                permissionLauncher.launch(blePermissions)
+                                            }
+                                        }) {
+                                            Icon(Icons.Default.BluetoothSearching, contentDescription = null)
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Scan")
+                                        }
+                                        Spacer(Modifier.height(4.dp))
+                                        OutlinedButton(onClick = onScanQr) {
+                                            Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("QR Code")
+                                        }
                                     }
                                 }
                             }
@@ -150,7 +181,44 @@ fun PrinterSettingsScreen(
                 }
             }
 
-            // Discovered devices
+            // Paired (bonded) devices
+            if (bondedDevices.isNotEmpty()) {
+                item {
+                    Text("Paired Devices", style = MaterialTheme.typography.labelMedium)
+                }
+                items(bondedDevices) { device ->
+                    @SuppressLint("MissingPermission")
+                    val deviceName = device.name ?: device.address
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.bleManager.connectByAddress(device.address)
+                                viewModel.savePrinterConnection(device.address, deviceName)
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(deviceName, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    device.address,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Icon(Icons.Default.Bluetooth, contentDescription = "Connect")
+                        }
+                    }
+                }
+            }
+
+            // Discovered devices (from BLE scan)
             if (discoveredDevices.isNotEmpty()) {
                 item {
                     Text("Found Devices", style = MaterialTheme.typography.labelMedium)

@@ -23,6 +23,7 @@ import com.ditherprint.app.ui.camera.CameraScreen
 import com.ditherprint.app.ui.editor.EditorScreen
 import com.ditherprint.app.ui.editor.EditorViewModel
 import com.ditherprint.app.ui.settings.PrinterSettingsScreen
+import com.ditherprint.app.ui.settings.QrScannerScreen
 import com.ditherprint.app.ui.theme.DitherPrintTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -94,7 +95,8 @@ fun DitherPrintNavigation(sharedImageUriFlow: MutableStateFlow<Uri?>) {
         composable("settings") {
             PrinterSettingsScreen(
                 viewModel = viewModel,
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                onScanQr = { navController.navigate("qr_scanner") }
             )
         }
         composable("camera") {
@@ -102,6 +104,15 @@ fun DitherPrintNavigation(sharedImageUriFlow: MutableStateFlow<Uri?>) {
                 viewModel = viewModel,
                 onBack = { navController.popBackStack() },
                 onCapture = { navController.popBackStack() }
+            )
+        }
+        composable("qr_scanner") {
+            QrScannerScreen(
+                onMacScanned = { mac ->
+                    viewModel.bleManager.connectByAddress(mac)
+                    navController.popBackStack()
+                },
+                onDismiss = { navController.popBackStack() }
             )
         }
     }
