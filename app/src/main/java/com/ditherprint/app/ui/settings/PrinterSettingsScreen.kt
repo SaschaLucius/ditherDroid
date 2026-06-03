@@ -24,6 +24,11 @@ import com.ditherprint.app.printer.PhomemoBleManager
 import com.ditherprint.app.printer.PhomemoProtocol
 import com.ditherprint.app.ui.editor.EditorViewModel
 
+private enum class PendingBluetoothAction {
+    StartScan,
+    Reconnect,
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PrinterSettingsScreen(
@@ -36,11 +41,6 @@ fun PrinterSettingsScreen(
     val bondedDevices by viewModel.bleManager.bondedDevices.collectAsState()
     val printerSettings by viewModel.printerSettings.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
-
-    // Load bonded devices on screen entry
-    LaunchedEffect(Unit) {
-        viewModel.bleManager.loadBondedDevices()
-    }
 
     val context = LocalContext.current
     val blePermissions = remember {
@@ -61,13 +61,32 @@ fun PrinterSettingsScreen(
         )
     }
 
+    var pendingBluetoothAction by remember {
+        mutableStateOf<PendingBluetoothAction?>(null)
+    }
+
+    LaunchedEffect(permissionsGranted) {
+        if (permissionsGranted) {
+            viewModel.bleManager.loadBondedDevices()
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
-        permissionsGranted = grants.values.all { it }
-        if (permissionsGranted) {
-            viewModel.bleManager.startScan()
+        permissionsGranted = blePermissions.all {
+            grants[it] ?: (ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED)
         }
+        if (permissionsGranted) {
+            when (pendingBluetoothAction) {
+                PendingBluetoothAction.StartScan -> viewModel.bleManager.startScan()
+                PendingBluetoothAction.Reconnect -> {
+                    printerSettings.lastPrinterMac?.let(viewModel.bleManager::connectByAddress)
+                }
+                null -> Unit
+            }
+        }
+        pendingBluetoothAction = null
     }
 
     Scaffold(
@@ -147,6 +166,7 @@ fun PrinterSettingsScreen(
                                                 if (permissionsGranted) {
                                                     viewModel.bleManager.connectByAddress(printerSettings.lastPrinterMac!!)
                                                 } else {
+                                                    pendingBluetoothAction = PendingBluetoothAction.Reconnect
                                                     permissionLauncher.launch(blePermissions)
                                                 }
                                             }) {
@@ -160,6 +180,7 @@ fun PrinterSettingsScreen(
                                             if (permissionsGranted) {
                                                 viewModel.bleManager.startScan()
                                             } else {
+                                                pendingBluetoothAction = PendingBluetoothAction.StartScan
                                                 permissionLauncher.launch(blePermissions)
                                             }
                                         }) {

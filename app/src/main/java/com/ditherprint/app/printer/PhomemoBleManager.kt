@@ -1,10 +1,13 @@
 package com.ditherprint.app.printer
 
 import android.annotation.SuppressLint
+import android.Manifest
 import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
@@ -48,15 +51,43 @@ class PhomemoBleManager(private val context: Context) {
     private val bluetoothAdapter: BluetoothAdapter?
         get() = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
 
+    private fun hasBluetoothPermission(permission: String): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasConnectPermission(): Boolean =
+        hasBluetoothPermission(Manifest.permission.BLUETOOTH_CONNECT)
+
+    private fun hasScanPermission(): Boolean =
+        hasBluetoothPermission(Manifest.permission.BLUETOOTH_SCAN)
+
     @SuppressLint("MissingPermission")
     fun loadBondedDevices() {
+        if (!hasConnectPermission()) {
+            _bondedDevices.value = emptyList()
+            return
+        }
         val adapter = bluetoothAdapter ?: return
-        val bonded = adapter.bondedDevices?.toList() ?: emptyList()
+        val bonded = try {
+            adapter.bondedDevices.toList()
+        } catch (_: SecurityException) {
+            emptyList()
+        }
         _bondedDevices.value = bonded
     }
 
     @SuppressLint("MissingPermission")
     fun startScan(durationMs: Long = 8000) {
+        if (!hasScanPermission()) {
+            _state.value = ConnectionState.Error("Bluetooth scan permission required")
+            return
+        }
+        if (!hasConnectPermission()) {
+            _state.value = ConnectionState.Error("Bluetooth connect permission required")
+            _bondedDevices.value = emptyList()
+            return
+        }
         val adapter = bluetoothAdapter ?: run {
             _state.value = ConnectionState.Error("Bluetooth not available")
             return
@@ -88,7 +119,14 @@ class PhomemoBleManager(private val context: Context) {
     fun stopScan() {
         scanTimeoutJob?.cancel()
         scanTimeoutJob = null
-        scanner?.stopScan(scanCallback)
+        val activeScanner = scanner
+        scanner = null
+        if (activeScanner != null && hasScanPermission()) {
+            try {
+                activeScanner.stopScan(scanCallback)
+            } catch (_: SecurityException) {
+            }
+        }
         if (_state.value is ConnectionState.Scanning) {
             _state.value = ConnectionState.Disconnected
         }
@@ -119,6 +157,10 @@ class PhomemoBleManager(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun connect(device: BluetoothDevice) {
+        if (!hasConnectPermission()) {
+            _state.value = ConnectionState.Error("Bluetooth connect permission required")
+            return
+        }
         stopScan()
         _state.value = ConnectionState.Connecting
         bluetoothGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
@@ -126,6 +168,10 @@ class PhomemoBleManager(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun connectByAddress(macAddress: String) {
+        if (!hasConnectPermission()) {
+            _state.value = ConnectionState.Error("Bluetooth connect permission required")
+            return
+        }
         val adapter = bluetoothAdapter ?: run {
             _state.value = ConnectionState.Error("Bluetooth not available")
             return
@@ -272,8 +318,18 @@ class PhomemoBleManager(private val context: Context) {
     fun disconnect() {
         scanTimeoutJob?.cancel()
         scanTimeoutJob = null
-        bluetoothGatt?.disconnect()
-        bluetoothGatt?.close()
+        bluetoothGatt?.let { gatt ->
+            if (hasConnectPermission()) {
+                try {
+                    gatt.disconnect()
+                } catch (_: SecurityException) {
+                }
+            }
+            try {
+                gatt.close()
+            } catch (_: SecurityException) {
+            }
+        }
         bluetoothGatt = null
         writeCharacteristic = null
         negotiatedMtu = 23
