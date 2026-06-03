@@ -136,18 +136,13 @@ class PhomemoBleManager(private val context: Context) {
         @SuppressLint("MissingPermission")
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
-            val name = device.name ?: return
-            // Show devices that look like Phomemo/thermal printers
-            if (!name.startsWith("M", ignoreCase = true) &&
-                !name.contains("phomemo", ignoreCase = true) &&
-                !name.startsWith("T0", ignoreCase = true) &&
-                !name.contains("printer", ignoreCase = true)
-            ) return
-
             val current = _discoveredDevices.value
-            if (current.none { it.address == device.address }) {
-                _discoveredDevices.value = current + device
-            }
+            if (current.any { it.address == device.address }) return
+            _discoveredDevices.value = current + device
+        }
+
+        override fun onBatchScanResults(results: MutableList<ScanResult>) {
+            results.forEach { onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, it) }
         }
 
         override fun onScanFailed(errorCode: Int) {

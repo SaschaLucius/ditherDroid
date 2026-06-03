@@ -65,6 +65,8 @@ fun PrinterSettingsScreen(
         mutableStateOf<PendingBluetoothAction?>(null)
     }
 
+    var hasScanned by remember { mutableStateOf(false) }
+
     LaunchedEffect(permissionsGranted) {
         if (permissionsGranted) {
             viewModel.bleManager.loadBondedDevices()
@@ -79,7 +81,10 @@ fun PrinterSettingsScreen(
         }
         if (permissionsGranted) {
             when (pendingBluetoothAction) {
-                PendingBluetoothAction.StartScan -> viewModel.bleManager.startScan()
+                PendingBluetoothAction.StartScan -> {
+                    hasScanned = true
+                    viewModel.bleManager.startScan()
+                }
                 PendingBluetoothAction.Reconnect -> {
                     printerSettings.lastPrinterMac?.let(viewModel.bleManager::connectByAddress)
                 }
@@ -177,6 +182,7 @@ fun PrinterSettingsScreen(
                                             Spacer(Modifier.height(4.dp))
                                         }
                                         OutlinedButton(onClick = {
+                                            hasScanned = true
                                             if (permissionsGranted) {
                                                 viewModel.bleManager.startScan()
                                             } else {
@@ -188,6 +194,12 @@ fun PrinterSettingsScreen(
                                             Spacer(Modifier.width(4.dp))
                                             Text("Scan")
                                         }
+                                        Text(
+                                            "Finds nearby Bluetooth devices. Tap one to connect by MAC address.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
                                         Spacer(Modifier.height(4.dp))
                                         OutlinedButton(onClick = onScanQr) {
                                             Icon(Icons.Default.QrCodeScanner, contentDescription = null)
@@ -240,18 +252,30 @@ fun PrinterSettingsScreen(
             }
 
             // Discovered devices (from BLE scan)
-            if (discoveredDevices.isNotEmpty()) {
+            if (connectionState is PhomemoBleManager.ConnectionState.Scanning ||
+                discoveredDevices.isNotEmpty()
+            ) {
                 item {
                     Text("Found Devices", style = MaterialTheme.typography.labelMedium)
                 }
-                items(discoveredDevices) { device ->
+            }
+            if (connectionState is PhomemoBleManager.ConnectionState.Scanning && discoveredDevices.isEmpty()) {
+                item {
+                    Text(
+                        "Scanning for nearby devices…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            items(discoveredDevices) { device ->
                     @SuppressLint("MissingPermission")
-                    val deviceName = device.name ?: device.address
+                    val deviceName = device.name?.takeIf { it.isNotBlank() } ?: "Unknown device"
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                viewModel.bleManager.connect(device)
+                                viewModel.bleManager.connectByAddress(device.address)
                                 viewModel.savePrinterConnection(device.address, deviceName)
                             }
                     ) {
@@ -273,6 +297,17 @@ fun PrinterSettingsScreen(
                             Icon(Icons.Default.BluetoothConnected, contentDescription = "Connect")
                         }
                     }
+                }
+            if (hasScanned &&
+                connectionState !is PhomemoBleManager.ConnectionState.Scanning &&
+                discoveredDevices.isEmpty()
+            ) {
+                item {
+                    Text(
+                        "No devices found. Make sure the printer is on and nearby, then tap Scan again.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
