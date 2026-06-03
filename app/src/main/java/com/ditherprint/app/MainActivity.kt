@@ -84,7 +84,7 @@ fun DitherPrintNavigation(sharedImageUriFlow: MutableStateFlow<Uri?>) {
         }
     }
 
-    NavHost(navController = navController, startDestination = "editor") {
+    NavHost(navController = navController, startDestination = "camera") {
         composable("editor") {
             EditorScreen(
                 viewModel = viewModel,
@@ -102,8 +102,8 @@ fun DitherPrintNavigation(sharedImageUriFlow: MutableStateFlow<Uri?>) {
         composable("camera") {
             CameraScreen(
                 viewModel = viewModel,
-                onBack = { navController.popBackStack() },
-                onCapture = { navController.popBackStack() }
+                onBack = { navController.navigate("editor") },
+                onCapture = { navController.navigate("editor") }
             )
         }
         composable("qr_scanner") {
