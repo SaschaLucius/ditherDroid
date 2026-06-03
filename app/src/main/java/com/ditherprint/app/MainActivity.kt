@@ -75,16 +75,22 @@ fun DitherPrintNavigation(sharedImageUriFlow: MutableStateFlow<Uri?>) {
     val navController = rememberNavController()
     val viewModel: EditorViewModel = viewModel()
 
-    // Load shared image when URI changes
+    // Load shared image when URI changes and open the editor
     val sharedUri by sharedImageUriFlow.collectAsState()
+    val startDestination = if (sharedUri != null) "editor" else "camera"
     LaunchedEffect(sharedUri) {
-        sharedUri?.let {
-            viewModel.loadImage(it)
+        sharedUri?.let { uri ->
+            viewModel.loadImage(uri)
+            if (navController.currentDestination?.route != "editor") {
+                navController.navigate("editor") {
+                    launchSingleTop = true
+                }
+            }
             sharedImageUriFlow.value = null
         }
     }
 
-    NavHost(navController = navController, startDestination = "camera") {
+    NavHost(navController = navController, startDestination = startDestination) {
         composable("editor") {
             EditorScreen(
                 viewModel = viewModel,
