@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
 import com.ditherprint.app.dithering.DitherAlgorithm
 import com.ditherprint.app.printer.PhomemoBleManager
+import com.ditherprint.app.printer.PhomemoProtocol
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +64,7 @@ fun EditorScreen(
     val showSaveDialog by viewModel.showSaveFavoriteDialog.collectAsState()
     val isCropping by viewModel.isCropping.collectAsState()
     val cropRect by viewModel.cropRect.collectAsState()
+    val printerInfo by viewModel.bleManager.printerInfo.collectAsState()
 
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -104,6 +106,28 @@ fun EditorScreen(
                     }
                     IconButton(onClick = { viewModel.showSaveFavoriteDialog() }) {
                         Icon(Icons.Default.Star, contentDescription = "Save favorite")
+                    }
+                    // Battery indicator (when connected)
+                    if (connectionState is PhomemoBleManager.ConnectionState.Connected && printerInfo.battery != null) {
+                        val bat = printerInfo.battery!!
+                        val batteryIcon = when {
+                            bat <= 5 -> Icons.Default.Battery0Bar
+                            bat <= 25 -> Icons.Default.Battery2Bar
+                            bat <= 50 -> Icons.Default.Battery4Bar
+                            bat <= 75 -> Icons.Default.Battery5Bar
+                            else -> Icons.Default.BatteryFull
+                        }
+                        val batteryColor = when {
+                            bat <= 10 -> MaterialTheme.colorScheme.error
+                            bat <= 25 -> MaterialTheme.colorScheme.tertiary
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
+                        Icon(
+                            batteryIcon,
+                            contentDescription = "Battery $bat%",
+                            tint = batteryColor,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")

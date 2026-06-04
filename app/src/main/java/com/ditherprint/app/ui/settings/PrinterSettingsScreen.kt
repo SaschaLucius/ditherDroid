@@ -311,6 +311,123 @@ fun PrinterSettingsScreen(
                 }
             }
 
+            // Printer status section (only when connected)
+            if (connectionState is PhomemoBleManager.ConnectionState.Connected) {
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Printer Status", style = MaterialTheme.typography.titleMedium)
+                }
+
+                item {
+                    val printerInfo by viewModel.bleManager.printerInfo.collectAsState()
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Status Info", style = MaterialTheme.typography.labelMedium)
+                                IconButton(onClick = { viewModel.refreshPrinterInfo() }) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                                }
+                            }
+
+                            // Battery
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                val batteryIcon = when {
+                                    printerInfo.battery == null -> Icons.Default.BatteryUnknown
+                                    printerInfo.battery!! <= 5 -> Icons.Default.Battery0Bar
+                                    printerInfo.battery!! <= 25 -> Icons.Default.Battery2Bar
+                                    printerInfo.battery!! <= 50 -> Icons.Default.Battery4Bar
+                                    printerInfo.battery!! <= 75 -> Icons.Default.Battery5Bar
+                                    else -> Icons.Default.BatteryFull
+                                }
+                                val batteryColor = when {
+                                    printerInfo.battery == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    printerInfo.battery!! <= 10 -> MaterialTheme.colorScheme.error
+                                    printerInfo.battery!! <= 25 -> MaterialTheme.colorScheme.tertiary
+                                    else -> MaterialTheme.colorScheme.primary
+                                }
+                                Icon(
+                                    batteryIcon,
+                                    contentDescription = "Battery",
+                                    tint = batteryColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Battery: ${printerInfo.battery?.let { "$it%" } ?: "—"}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+
+                            // Paper
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                val paperColor = when (printerInfo.paper) {
+                                    "out" -> MaterialTheme.colorScheme.error
+                                    "ok" -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                Icon(
+                                    Icons.Default.Receipt,
+                                    contentDescription = "Paper",
+                                    tint = paperColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Paper: ${printerInfo.paper?.replaceFirstChar { it.uppercase() } ?: "—"}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+
+                            // Firmware
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Info,
+                                    contentDescription = "Firmware",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Firmware: ${printerInfo.firmware ?: "—"}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+
+                            // Serial
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Tag,
+                                    contentDescription = "Serial",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Serial: ${printerInfo.serial ?: "—"}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // Density section
             item {
                 Spacer(Modifier.height(8.dp))
@@ -364,6 +481,46 @@ fun PrinterSettingsScreen(
                             onClick = { viewModel.savePaperSize(size) },
                             label = { Text(size.label) }
                         )
+                    }
+                }
+            }
+
+            // Print speed section
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text("Print Speed", style = MaterialTheme.typography.titleMedium)
+            }
+
+            item {
+                var speedExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = speedExpanded,
+                    onExpandedChange = { speedExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = printerSettings.printSpeed.label,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Speed / Quality") },
+                        supportingText = { Text("Fast = lighter print, Max Quality = darker & slower") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = speedExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = speedExpanded,
+                        onDismissRequest = { speedExpanded = false }
+                    ) {
+                        PhomemoProtocol.PrintSpeed.entries.forEach { speed ->
+                            DropdownMenuItem(
+                                text = { Text(speed.label) },
+                                onClick = {
+                                    viewModel.savePrintSpeed(speed)
+                                    speedExpanded = false
+                                }
+                            )
+                        }
                     }
                 }
             }

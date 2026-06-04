@@ -21,6 +21,7 @@ class SettingsRepository(private val context: Context) {
     private val LAST_PRINTER_NAME = stringPreferencesKey("last_printer_name")
     private val DENSITY = intPreferencesKey("density")
     private val PAPER_SIZE = stringPreferencesKey("paper_size")
+    private val PRINT_SPEED = stringPreferencesKey("print_speed")
 
     // Favorite (default) dither settings
     private val FAV_ALGORITHM = stringPreferencesKey("fav_algorithm")
@@ -38,7 +39,8 @@ class SettingsRepository(private val context: Context) {
         val lastPrinterMac: String? = null,
         val lastPrinterName: String? = null,
         val density: PhomemoProtocol.Density = PhomemoProtocol.Density.DEFAULT,
-        val paperSize: PhomemoProtocol.PaperSize = PhomemoProtocol.PaperSize.MM_53
+        val paperSize: PhomemoProtocol.PaperSize = PhomemoProtocol.PaperSize.MM_53,
+        val printSpeed: PhomemoProtocol.PrintSpeed = PhomemoProtocol.PrintSpeed.NORMAL
     )
 
     data class DitherSettings(
@@ -64,7 +66,10 @@ class SettingsRepository(private val context: Context) {
             } ?: PhomemoProtocol.Density.DEFAULT,
             paperSize = prefs[PAPER_SIZE]?.let { name ->
                 PhomemoProtocol.PaperSize.entries.find { it.name == name }
-            } ?: PhomemoProtocol.PaperSize.MM_53
+            } ?: PhomemoProtocol.PaperSize.MM_53,
+            printSpeed = prefs[PRINT_SPEED]?.let { name ->
+                PhomemoProtocol.PrintSpeed.entries.find { it.name == name }
+            } ?: PhomemoProtocol.PrintSpeed.NORMAL
         )
     }
 
@@ -116,6 +121,12 @@ class SettingsRepository(private val context: Context) {
     suspend fun savePaperSize(paperSize: PhomemoProtocol.PaperSize) {
         context.dataStore.edit { prefs ->
             prefs[PAPER_SIZE] = paperSize.name
+        }
+    }
+
+    suspend fun savePrintSpeed(speed: PhomemoProtocol.PrintSpeed) {
+        context.dataStore.edit { prefs ->
+            prefs[PRINT_SPEED] = speed.name
         }
     }
 

@@ -7,15 +7,23 @@ import android.bluetooth.le.*
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import java.util.UUID
 
 /**
  * BLE manager for discovering and communicating with Phomemo printers.
  * Ported from node-phomemo-printer/index.js BLE logic.
  */
 class PhomemoBleManager(private val context: Context) {
+
+    companion object {
+        private const val TAG = "PhomemoBleManager"
+        // CCC descriptor UUID for enabling notifications
+        private val CCC_DESCRIPTOR_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    }
 
     sealed class ConnectionState {
         data object Disconnected : ConnectionState()
@@ -41,8 +49,12 @@ class PhomemoBleManager(private val context: Context) {
     private val _printProgress = MutableStateFlow<PrintProgress?>(null)
     val printProgress: StateFlow<PrintProgress?> = _printProgress.asStateFlow()
 
+    private val _printerInfo = MutableStateFlow(PhomemoProtocol.PrinterInfo())
+    val printerInfo: StateFlow<PhomemoProtocol.PrinterInfo> = _printerInfo.asStateFlow()
+
     private var bluetoothGatt: BluetoothGatt? = null
     private var writeCharacteristic: BluetoothGattCharacteristic? = null
+    private var notifyCharacteristic: BluetoothGattCharacteristic? = null
     private var scanner: BluetoothLeScanner? = null
     private var writeComplete = CompletableDeferred<Unit>()
     private var scanTimeoutJob: Job? = null
@@ -214,20 +226,55 @@ class PhomemoBleManager(private val context: Context) {
                 return
             }
 
-            // Find a writable characteristic (matching node-phomemo-printer approach)
+            // Find writable and notify characteristics
+            var foundWrite: BluetoothGattCharacteristic? = null
+            var foundNotify: BluetoothGattCharacteristic? = null
+
             for (service in gatt.services) {
                 for (char in service.characteristics) {
-                    if (char.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0 ||
-                        char.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+                    if (foundWrite == null &&
+                        (char.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0 ||
+                         char.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0)
                     ) {
-                        writeCharacteristic = char
-                        val deviceName = gatt.device.name ?: gatt.device.address
-                        _state.value = ConnectionState.Connected(deviceName)
-                        return
+                        foundWrite = char
+                    }
+                    if (foundNotify == null &&
+                        (char.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 ||
+                         char.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0)
+                    ) {
+                        foundNotify = char
                     }
                 }
             }
-            _state.value = ConnectionState.Error("No writable characteristic found")
+
+            if (foundWrite == null) {
+                _state.value = ConnectionState.Error("No writable characteristic found")
+                return
+            }
+
+            writeCharacteristic = foundWrite
+
+            // Enable notifications if available
+            if (foundNotify != null) {
+                notifyCharacteristic = foundNotify
+                gatt.setCharacteristicNotification(foundNotify, true)
+                val descriptor = foundNotify.getDescriptor(CCC_DESCRIPTOR_UUID)
+                if (descriptor != null) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        @Suppress("DEPRECATION")
+                        gatt.writeDescriptor(descriptor)
+                    }
+                }
+                Log.d(TAG, "Notifications enabled on ${foundNotify.uuid}")
+            }
+
+            val deviceName = gatt.device.name ?: gatt.device.address
+            _state.value = ConnectionState.Connected(deviceName)
+            _printerInfo.value = PhomemoProtocol.PrinterInfo()
         }
 
         override fun onCharacteristicWrite(
@@ -241,6 +288,55 @@ class PhomemoBleManager(private val context: Context) {
                 writeComplete.completeExceptionally(
                     Exception("Write failed with status $status")
                 )
+            }
+        }
+
+        @Deprecated("Deprecated in API 33")
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic
+        ) {
+            @Suppress("DEPRECATION")
+            val data = characteristic.value ?: return
+            handleNotification(data)
+        }
+
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray
+        ) {
+            handleNotification(value)
+        }
+    }
+
+    private fun handleNotification(data: ByteArray) {
+        val result = PhomemoProtocol.parseNotification(data, _printerInfo.value)
+        if (result != null) {
+            val (field, updated) = result
+            _printerInfo.value = updated
+            Log.d(TAG, "Printer info updated: $field -> $updated")
+        }
+    }
+
+    /**
+     * Query all printer status information.
+     * Sends battery, paper, firmware, serial queries with delays between them.
+     */
+    suspend fun queryPrinterInfo() {
+        if (_state.value !is ConnectionState.Connected) return
+        val queries = listOf(
+            PhomemoProtocol.QueryCommands.BATTERY,
+            PhomemoProtocol.QueryCommands.PAPER,
+            PhomemoProtocol.QueryCommands.FIRMWARE,
+            PhomemoProtocol.QueryCommands.SERIAL
+        )
+        for (query in queries) {
+            try {
+                sendData(query)
+                delay(150)
+            } catch (e: Exception) {
+                Log.w(TAG, "Query failed: ${e.message}")
             }
         }
     }
@@ -298,7 +394,14 @@ class PhomemoBleManager(private val context: Context) {
     /**
      * Print a dithered bitmap.
      */
-    suspend fun print(bitmap: android.graphics.Bitmap, density: PhomemoProtocol.Density) {
+    suspend fun print(
+        bitmap: android.graphics.Bitmap,
+        density: PhomemoProtocol.Density,
+        speed: PhomemoProtocol.PrintSpeed = PhomemoProtocol.PrintSpeed.NORMAL
+    ) {
+        // Send heat settings
+        sendData(PhomemoProtocol.buildHeatSettingsPacket(speed))
+        delay(50)
         // Send density packet if not default
         if (density != PhomemoProtocol.Density.DEFAULT) {
             sendData(PhomemoProtocol.buildDensityPacket(density))
@@ -327,7 +430,9 @@ class PhomemoBleManager(private val context: Context) {
         }
         bluetoothGatt = null
         writeCharacteristic = null
+        notifyCharacteristic = null
         negotiatedMtu = 23
         _state.value = ConnectionState.Disconnected
+        _printerInfo.value = PhomemoProtocol.PrinterInfo()
     }
 }

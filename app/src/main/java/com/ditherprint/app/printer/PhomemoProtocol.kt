@@ -37,6 +37,95 @@ object PhomemoProtocol {
         HIGHEST(0xFF, "Highest")
     }
 
+    /** Print speed / heat time levels. Higher heatTime = darker but slower. */
+    enum class PrintSpeed(val heatTime: Int, val label: String) {
+        FAST(40, "Fast"),
+        MEDIUM_FAST(60, "Medium Fast"),
+        NORMAL(80, "Normal"),
+        HIGH_QUALITY(120, "High Quality"),
+        MAX_QUALITY(160, "Max Quality")
+    }
+
+    /** Printer status information parsed from BLE notifications. */
+    data class PrinterInfo(
+        val battery: Int? = null,
+        val paper: String? = null,
+        val firmware: String? = null,
+        val serial: String? = null,
+        val cover: String? = null
+    )
+
+    /** Query commands to request printer status via BLE. Format: [0x1F, 0x11, X] */
+    object QueryCommands {
+        val BATTERY = byteArrayOf(0x1F, 0x11, 0x08)
+        val PAPER = byteArrayOf(0x1F, 0x11, 0x11)
+        val FIRMWARE = byteArrayOf(0x1F, 0x11, 0x07)
+        val SERIAL = byteArrayOf(0x1F, 0x11, 0x09)
+        val COVER = byteArrayOf(0x1F, 0x11, 0x12)
+    }
+
+    /**
+     * Build ESC 7 heat settings packet.
+     * Controls print darkness/speed tradeoff.
+     * @param maxDots simultaneous dots heated (default 7)
+     * @param heatTime heating duration; higher = darker/slower (range ~3-255)
+     * @param heatInterval recovery time between groups (default 2)
+     */
+    fun buildHeatSettingsPacket(
+        speed: PrintSpeed,
+        maxDots: Int = 7,
+        heatInterval: Int = 2
+    ): ByteArray {
+        return byteArrayOf(0x1B, 0x37, maxDots.toByte(), speed.heatTime.toByte(), heatInterval.toByte())
+    }
+
+    /**
+     * Parse a BLE notification response into a field update for PrinterInfo.
+     * Response format: 0x1A, type, data...
+     * Returns a pair of (field name, updated PrinterInfo) or null if unrecognized.
+     */
+    fun parseNotification(data: ByteArray, current: PrinterInfo): Pair<String, PrinterInfo>? {
+        if (data.size < 3 || data[0] != 0x1A.toByte()) return null
+
+        val type = data[1].toInt() and 0xFF
+        return when (type) {
+            0x04 -> { // Battery
+                val raw = data[2].toInt() and 0xFF
+                val level = when (raw) {
+                    0xA4 -> 0
+                    0xA3 -> 3
+                    0xA2 -> 5
+                    0xA1 -> 10
+                    else -> raw
+                }
+                "battery" to current.copy(battery = level)
+            }
+            0x05 -> { // Cover
+                val raw = data[2].toInt() and 0xFF
+                val status = when (raw) {
+                    0x98 -> "open"
+                    0x99 -> "closed"
+                    else -> "unknown"
+                }
+                "cover" to current.copy(cover = status)
+            }
+            0x06 -> { // Paper
+                val raw = data[2].toInt() and 0xFF
+                val status = if (raw == 0x88) "out" else "ok"
+                "paper" to current.copy(paper = status)
+            }
+            0x07 -> { // Firmware
+                val version = data.drop(2).joinToString(".") { (it.toInt() and 0xFF).toString() }
+                "firmware" to current.copy(firmware = version)
+            }
+            0x08 -> { // Serial
+                val serial = String(data, 2, data.size - 2, Charsets.US_ASCII)
+                "serial" to current.copy(serial = serial)
+            }
+            else -> null
+        }
+    }
+
     /**
      * Build the density control packet (31 bytes).
      * Density byte is at offset 22.

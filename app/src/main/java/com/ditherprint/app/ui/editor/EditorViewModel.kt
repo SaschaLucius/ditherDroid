@@ -122,6 +122,16 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        // Auto-query printer info when connection is established
+        viewModelScope.launch {
+            bleManager.state.collect { state ->
+                if (state is PhomemoBleManager.ConnectionState.Connected) {
+                    delay(500) // Give the printer a moment to stabilize
+                    bleManager.queryPrinterInfo()
+                }
+            }
+        }
+
         // Auto-re-dither when parameters change (debounced)
         viewModelScope.launch {
             combine(
@@ -371,16 +381,24 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { settingsRepo.savePaperSize(paperSize) }
     }
 
+    fun savePrintSpeed(speed: PhomemoProtocol.PrintSpeed) {
+        viewModelScope.launch { settingsRepo.savePrintSpeed(speed) }
+    }
+
+    fun refreshPrinterInfo() {
+        viewModelScope.launch { bleManager.queryPrinterInfo() }
+    }
+
     fun print() {
         val bitmap = _ditheredBitmap.value ?: return
-        val density = printerSettings.value.density
+        val settings = printerSettings.value
 
         _isPrinting.value = true
         _printError.value = null
 
         viewModelScope.launch {
             try {
-                bleManager.print(bitmap, density)
+                bleManager.print(bitmap, settings.density, settings.printSpeed)
             } catch (e: Exception) {
                 _printError.value = "Print failed: ${e.message}"
             } finally {
