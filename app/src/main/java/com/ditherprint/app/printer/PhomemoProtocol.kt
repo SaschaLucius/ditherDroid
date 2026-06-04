@@ -46,13 +46,28 @@ object PhomemoProtocol {
         MAX_QUALITY(160, "Max Quality")
     }
 
+    /** Image alignment on paper via ESC a command. */
+    enum class Alignment(val value: Int, val label: String) {
+        LEFT(0, "Left"),
+        CENTER(1, "Center"),
+        RIGHT(2, "Right")
+    }
+
+    /** Default paper feed after print (in dots). */
+    const val DEFAULT_PAPER_FEED = 4
+    const val MIN_PAPER_FEED = 0
+    const val MAX_PAPER_FEED = 50
+
     /** Printer status information parsed from BLE notifications. */
     data class PrinterInfo(
         val battery: Int? = null,
         val paper: String? = null,
         val firmware: String? = null,
         val serial: String? = null,
-        val cover: String? = null
+        val cover: String? = null,
+        val version: String? = null,
+        val mac: String? = null,
+        val isPrinting: Boolean = false
     )
 
     /** Query commands to request printer status via BLE. Format: [0x1F, 0x11, X] */
@@ -62,6 +77,8 @@ object PhomemoProtocol {
         val FIRMWARE = byteArrayOf(0x1F, 0x11, 0x07)
         val SERIAL = byteArrayOf(0x1F, 0x11, 0x09)
         val COVER = byteArrayOf(0x1F, 0x11, 0x12)
+        val VERSION = byteArrayOf(0x1F, 0x11, 0x33)
+        val MAC = byteArrayOf(0x1F, 0x11, 0x20)
     }
 
     /**
@@ -122,6 +139,19 @@ object PhomemoProtocol {
                 val serial = String(data, 2, data.size - 2, Charsets.US_ASCII)
                 "serial" to current.copy(serial = serial)
             }
+            0x0B -> { // Print status
+                val raw = data[2].toInt() and 0xFF
+                val printing = raw != 0xB8.toInt() && raw != 0x00
+                "print" to current.copy(isPrinting = printing)
+            }
+            0x0D -> { // MAC address
+                val mac = String(data, 2, data.size - 2, Charsets.US_ASCII)
+                "mac" to current.copy(mac = mac)
+            }
+            0x11 -> { // Version
+                val version = data.drop(2).joinToString(".") { (it.toInt() and 0xFF).toString() }
+                "version" to current.copy(version = version)
+            }
             else -> null
         }
     }
@@ -146,8 +176,14 @@ object PhomemoProtocol {
     /**
      * Build the complete print data from a dithered B&W bitmap.
      * The bitmap should already be IMAGE_WIDTH pixels wide and dithered.
+     * @param alignment text/image alignment on paper
+     * @param paperFeed number of dot-lines to feed after printing (0-50)
      */
-    fun buildPrintData(bitmap: Bitmap): ByteArray {
+    fun buildPrintData(
+        bitmap: Bitmap,
+        alignment: Alignment = Alignment.LEFT,
+        paperFeed: Int = DEFAULT_PAPER_FEED
+    ): ByteArray {
         val width = bitmap.width
         val height = bitmap.height
         require(width == IMAGE_WIDTH) { "Bitmap must be $IMAGE_WIDTH pixels wide, got $width" }
@@ -161,10 +197,10 @@ object PhomemoProtocol {
         // ESC @ : reset/init printer
         data.add(27)  // ESC
         data.add(64)  // @
-        // ESC a 0 : left justified
+        // ESC a n : set justification
         data.add(27)  // ESC
         data.add(97)  // a
-        data.add(0)   // left
+        data.add(alignment.value.toByte())
         // Printer-specific init bytes
         data.add(31)
         data.add(17)
@@ -217,9 +253,11 @@ object PhomemoProtocol {
         }
 
         // --- FOOTER ---
-        // ESC d 2 : feed 2 lines (twice)
-        data.add(27); data.add(100); data.add(2)
-        data.add(27); data.add(100); data.add(2)
+        // ESC d n : feed n lines (configurable)
+        val feedValue = paperFeed.coerceIn(MIN_PAPER_FEED, MAX_PAPER_FEED)
+        if (feedValue > 0) {
+            data.add(27); data.add(100); data.add(feedValue.toByte())
+        }
         // End-of-job markers
         data.add(31); data.add(17); data.add(8)
         data.add(31); data.add(17); data.add(14)

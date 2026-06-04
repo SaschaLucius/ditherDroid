@@ -385,6 +385,14 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { settingsRepo.savePrintSpeed(speed) }
     }
 
+    fun savePaperFeed(feed: Int) {
+        viewModelScope.launch { settingsRepo.savePaperFeed(feed) }
+    }
+
+    fun saveAlignment(alignment: PhomemoProtocol.Alignment) {
+        viewModelScope.launch { settingsRepo.saveAlignment(alignment) }
+    }
+
     fun refreshPrinterInfo() {
         viewModelScope.launch { bleManager.queryPrinterInfo() }
     }
@@ -398,7 +406,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             try {
-                bleManager.print(bitmap, settings.density, settings.printSpeed)
+                bleManager.print(
+                    bitmap,
+                    settings.density,
+                    settings.printSpeed,
+                    settings.alignment,
+                    settings.paperFeed
+                )
             } catch (e: Exception) {
                 _printError.value = "Print failed: ${e.message}"
             } finally {

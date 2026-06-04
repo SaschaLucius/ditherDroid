@@ -423,6 +423,42 @@ fun PrinterSettingsScreen(
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
+
+                            // Version
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Info,
+                                    contentDescription = "Version",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Version: ${printerInfo.version ?: "—"}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+
+                            // MAC
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Bluetooth,
+                                    contentDescription = "MAC",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "MAC: ${printerInfo.mac ?: "—"}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
                         }
                     }
                 }
@@ -521,6 +557,53 @@ fun PrinterSettingsScreen(
                                 }
                             )
                         }
+                    }
+                }
+            }
+
+            // Alignment section
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text("Alignment", style = MaterialTheme.typography.titleMedium)
+            }
+
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PhomemoProtocol.Alignment.entries.forEach { alignment ->
+                        FilterChip(
+                            selected = printerSettings.alignment == alignment,
+                            onClick = { viewModel.saveAlignment(alignment) },
+                            label = { Text(alignment.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                        )
+                    }
+                }
+            }
+
+            // Paper feed section
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text("Paper Feed", style = MaterialTheme.typography.titleMedium)
+            }
+
+            item {
+                Column {
+                    Text(
+                        "Feed after print: ${printerSettings.paperFeed} dots",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Slider(
+                        value = printerSettings.paperFeed.toFloat(),
+                        onValueChange = { viewModel.savePaperFeed(it.toInt()) },
+                        valueRange = PhomemoProtocol.MIN_PAPER_FEED.toFloat()..PhomemoProtocol.MAX_PAPER_FEED.toFloat(),
+                        steps = PhomemoProtocol.MAX_PAPER_FEED - PhomemoProtocol.MIN_PAPER_FEED - 1,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("${PhomemoProtocol.MIN_PAPER_FEED}", style = MaterialTheme.typography.bodySmall)
+                        Text("${PhomemoProtocol.MAX_PAPER_FEED}", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

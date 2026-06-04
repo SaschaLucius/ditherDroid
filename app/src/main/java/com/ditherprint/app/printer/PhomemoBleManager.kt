@@ -57,6 +57,7 @@ class PhomemoBleManager(private val context: Context) {
     private var notifyCharacteristic: BluetoothGattCharacteristic? = null
     private var scanner: BluetoothLeScanner? = null
     private var writeComplete = CompletableDeferred<Unit>()
+    private var printDoneDeferred: CompletableDeferred<Unit>? = null
     private var scanTimeoutJob: Job? = null
     private var negotiatedMtu: Int = 23  // BLE default MTU
 
@@ -316,12 +317,16 @@ class PhomemoBleManager(private val context: Context) {
             val (field, updated) = result
             _printerInfo.value = updated
             Log.d(TAG, "Printer info updated: $field -> $updated")
+            // Signal print-done when printer reports not printing
+            if (field == "print" && !updated.isPrinting) {
+                printDoneDeferred?.complete(Unit)
+            }
         }
     }
 
     /**
      * Query all printer status information.
-     * Sends battery, paper, firmware, serial queries with delays between them.
+     * Sends battery, paper, firmware, serial, version queries with delays between them.
      */
     suspend fun queryPrinterInfo() {
         if (_state.value !is ConnectionState.Connected) return
@@ -329,7 +334,9 @@ class PhomemoBleManager(private val context: Context) {
             PhomemoProtocol.QueryCommands.BATTERY,
             PhomemoProtocol.QueryCommands.PAPER,
             PhomemoProtocol.QueryCommands.FIRMWARE,
-            PhomemoProtocol.QueryCommands.SERIAL
+            PhomemoProtocol.QueryCommands.SERIAL,
+            PhomemoProtocol.QueryCommands.VERSION,
+            PhomemoProtocol.QueryCommands.MAC
         )
         for (query in queries) {
             try {
@@ -397,8 +404,14 @@ class PhomemoBleManager(private val context: Context) {
     suspend fun print(
         bitmap: android.graphics.Bitmap,
         density: PhomemoProtocol.Density,
-        speed: PhomemoProtocol.PrintSpeed = PhomemoProtocol.PrintSpeed.NORMAL
+        speed: PhomemoProtocol.PrintSpeed = PhomemoProtocol.PrintSpeed.NORMAL,
+        alignment: PhomemoProtocol.Alignment = PhomemoProtocol.Alignment.LEFT,
+        paperFeed: Int = PhomemoProtocol.DEFAULT_PAPER_FEED
     ) {
+        // Prepare print-done detection
+        printDoneDeferred = CompletableDeferred()
+        _printerInfo.value = _printerInfo.value.copy(isPrinting = true)
+
         // Send heat settings
         sendData(PhomemoProtocol.buildHeatSettingsPacket(speed))
         delay(50)
@@ -408,8 +421,20 @@ class PhomemoBleManager(private val context: Context) {
             delay(100)
         }
         // Send print data
-        val printData = PhomemoProtocol.buildPrintData(bitmap)
+        val printData = PhomemoProtocol.buildPrintData(bitmap, alignment, paperFeed)
         sendData(printData)
+
+        // Wait for printer to signal done, with timeout fallback
+        try {
+            withTimeout(30_000) {
+                printDoneDeferred?.await()
+            }
+        } catch (_: TimeoutCancellationException) {
+            Log.w(TAG, "Print-done notification timeout, assuming complete")
+        } finally {
+            printDoneDeferred = null
+            _printerInfo.value = _printerInfo.value.copy(isPrinting = false)
+        }
     }
 
     @SuppressLint("MissingPermission")

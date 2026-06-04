@@ -22,6 +22,8 @@ class SettingsRepository(private val context: Context) {
     private val DENSITY = intPreferencesKey("density")
     private val PAPER_SIZE = stringPreferencesKey("paper_size")
     private val PRINT_SPEED = stringPreferencesKey("print_speed")
+    private val PAPER_FEED = intPreferencesKey("paper_feed")
+    private val ALIGNMENT = stringPreferencesKey("alignment")
 
     // Favorite (default) dither settings
     private val FAV_ALGORITHM = stringPreferencesKey("fav_algorithm")
@@ -40,7 +42,9 @@ class SettingsRepository(private val context: Context) {
         val lastPrinterName: String? = null,
         val density: PhomemoProtocol.Density = PhomemoProtocol.Density.DEFAULT,
         val paperSize: PhomemoProtocol.PaperSize = PhomemoProtocol.PaperSize.MM_53,
-        val printSpeed: PhomemoProtocol.PrintSpeed = PhomemoProtocol.PrintSpeed.NORMAL
+        val printSpeed: PhomemoProtocol.PrintSpeed = PhomemoProtocol.PrintSpeed.NORMAL,
+        val paperFeed: Int = PhomemoProtocol.DEFAULT_PAPER_FEED,
+        val alignment: PhomemoProtocol.Alignment = PhomemoProtocol.Alignment.LEFT
     )
 
     data class DitherSettings(
@@ -69,7 +73,11 @@ class SettingsRepository(private val context: Context) {
             } ?: PhomemoProtocol.PaperSize.MM_53,
             printSpeed = prefs[PRINT_SPEED]?.let { name ->
                 PhomemoProtocol.PrintSpeed.entries.find { it.name == name }
-            } ?: PhomemoProtocol.PrintSpeed.NORMAL
+            } ?: PhomemoProtocol.PrintSpeed.NORMAL,
+            paperFeed = prefs[PAPER_FEED] ?: PhomemoProtocol.DEFAULT_PAPER_FEED,
+            alignment = prefs[ALIGNMENT]?.let { name ->
+                PhomemoProtocol.Alignment.entries.find { it.name == name }
+            } ?: PhomemoProtocol.Alignment.LEFT
         )
     }
 
@@ -127,6 +135,18 @@ class SettingsRepository(private val context: Context) {
     suspend fun savePrintSpeed(speed: PhomemoProtocol.PrintSpeed) {
         context.dataStore.edit { prefs ->
             prefs[PRINT_SPEED] = speed.name
+        }
+    }
+
+    suspend fun savePaperFeed(feed: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[PAPER_FEED] = feed.coerceIn(PhomemoProtocol.MIN_PAPER_FEED, PhomemoProtocol.MAX_PAPER_FEED)
+        }
+    }
+
+    suspend fun saveAlignment(alignment: PhomemoProtocol.Alignment) {
+        context.dataStore.edit { prefs ->
+            prefs[ALIGNMENT] = alignment.name
         }
     }
 
