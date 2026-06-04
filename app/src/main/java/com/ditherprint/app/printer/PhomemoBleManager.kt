@@ -114,12 +114,13 @@ class PhomemoBleManager(private val context: Context) {
         _discoveredDevices.value = emptyList()
         _state.value = ConnectionState.Scanning
 
-        val scanFilter = ScanFilter.Builder().build()
         val scanSettings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        scanner?.startScan(listOf(scanFilter), scanSettings, scanCallback)
+        // Pass null filters to scan for all BLE devices; an empty ScanFilter list
+        // silently returns no results on many OEM builds.
+        scanner?.startScan(null, scanSettings, scanCallback)
 
         scanTimeoutJob?.cancel()
         scanTimeoutJob = CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
