@@ -143,6 +143,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
         // Auto-re-dither when parameters change (debounced)
         viewModelScope.launch {
+            @Suppress("INFERRED_TYPE_VARIABLE_INTO_POSSIBLE_EMPTY_INTERSECTION")
             combine(
                 _algorithm, _brightness, _contrast, _invert, _bayerSize,
                 _bayerScale, _threshold, _gamma, _errorDiffusionStrength,

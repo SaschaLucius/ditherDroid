@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.BatteryUnknown
+import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -190,7 +192,7 @@ fun PrinterSettingsScreen(
                                                 permissionLauncher.launch(blePermissions)
                                             }
                                         }) {
-                                            Icon(Icons.Default.BluetoothSearching, contentDescription = null)
+                                            Icon(Icons.AutoMirrored.Filled.BluetoothSearching, contentDescription = null)
                                             Spacer(Modifier.width(4.dp))
                                             Text("Scan")
                                         }
@@ -339,7 +341,7 @@ fun PrinterSettingsScreen(
                                 modifier = Modifier.padding(vertical = 4.dp)
                             ) {
                                 val batteryIcon = when {
-                                    printerInfo.battery == null -> Icons.Default.BatteryUnknown
+                                    printerInfo.battery == null -> Icons.AutoMirrored.Filled.BatteryUnknown
                                     printerInfo.battery!! <= 5 -> Icons.Default.Battery0Bar
                                     printerInfo.battery!! <= 25 -> Icons.Default.Battery2Bar
                                     printerInfo.battery!! <= 50 -> Icons.Default.Battery4Bar
@@ -484,7 +486,7 @@ fun PrinterSettingsScreen(
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = densityExpanded) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .menuAnchor()
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, true)
                     )
                     ExposedDropdownMenu(
                         expanded = densityExpanded,
@@ -542,7 +544,7 @@ fun PrinterSettingsScreen(
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = speedExpanded) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .menuAnchor()
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, true)
                     )
                     ExposedDropdownMenu(
                         expanded = speedExpanded,
