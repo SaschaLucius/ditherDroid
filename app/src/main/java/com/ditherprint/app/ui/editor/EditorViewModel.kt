@@ -132,6 +132,15 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        // Re-scale image when paper size changes
+        viewModelScope.launch {
+            printerSettings
+                .map { it.paperSize }
+                .distinctUntilChanged()
+                .drop(1) // skip initial value
+                .collect { applyCropAndResize() }
+        }
+
         // Auto-re-dither when parameters change (debounced)
         viewModelScope.launch {
             combine(
