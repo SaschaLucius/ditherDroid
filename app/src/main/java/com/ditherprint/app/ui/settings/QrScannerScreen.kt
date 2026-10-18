@@ -1,8 +1,10 @@
 package com.ditherprint.app.ui.settings
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.provider.Settings
 import androidx.annotation.OptIn
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
@@ -11,23 +13,53 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asExecutor
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * Extracts a MAC address from a Phomemo QR code URL.
@@ -38,9 +70,9 @@ fun extractMacFromUrl(url: String): String? {
     return try {
         val uri = Uri.parse(url)
         val rawMac = uri.getQueryParameter("mac") ?: return null
-        if (rawMac.length != 12) return null
-        // Format as XX:XX:XX:XX:XX:XX
-        rawMac.chunked(2).joinToString(":")
+        val cleaned = rawMac.replace(":", "").replace("-", "").uppercase()
+        if (cleaned.length != 12 || cleaned.any { it !in "0123456789ABCDEF" }) return null
+        cleaned.chunked(2).joinToString(":")
     } catch (_: Exception) {
         null
     }
@@ -53,19 +85,24 @@ fun QrScannerScreen(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     var scannedMac by remember { mutableStateOf<String?>(null) }
     var hasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-                    PackageManager.PERMISSION_GRANTED
+                PackageManager.PERMISSION_GRANTED
         )
     }
+    var permissionDenied by remember { mutableStateOf(false) }
+    var cameraError by remember { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val invalidQrEvents = remember { Channel<Unit>(Channel.BUFFERED) }
+    var lastInvalidAt by remember { mutableLongStateOf(0L) }
 
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasCameraPermission = granted
+        permissionDenied = !granted
     }
 
     LaunchedEffect(Unit) {
@@ -74,13 +111,25 @@ fun QrScannerScreen(
         }
     }
 
+    LaunchedEffect(Unit) {
+        invalidQrEvents.receiveAsFlow().collect {
+            val now = System.currentTimeMillis()
+            if (now - lastInvalidAt > 2500) {
+                lastInvalidAt = now
+                snackbarHostState.showSnackbar("QR code found, but no valid printer MAC")
+            }
+        }
+    }
+
     Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Scan Printer QR Code") },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -92,30 +141,63 @@ fun QrScannerScreen(
                 .padding(padding),
             contentAlignment = Alignment.Center
         ) {
-            if (!hasCameraPermission) {
-                Text("Camera permission required to scan QR code")
-            } else {
-                QrCameraPreview(
-                    onQrDetected = { url ->
-                        if (scannedMac == null) {
-                            val mac = extractMacFromUrl(url)
-                            if (mac != null) {
-                                scannedMac = mac
-                                onMacScanned(mac)
-                            }
+            when {
+                !hasCameraPermission -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Camera permission required to scan QR code")
+                        Spacer(Modifier.height(8.dp))
+                        if (permissionDenied) {
+                            Button(onClick = {
+                                context.startActivity(
+                                    Intent(
+                                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        Uri.fromParts("package", context.packageName, null)
+                                    )
+                                )
+                            }) { Text("Open Settings") }
+                            Spacer(Modifier.height(4.dp))
+                            TextButton(onClick = {
+                                permissionLauncher.launch(Manifest.permission.CAMERA)
+                            }) { Text("Try again") }
                         }
                     }
-                )
+                }
+                cameraError != null -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(cameraError!!, color = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = { cameraError = null }) { Text("Retry") }
+                    }
+                }
+                else -> {
+                    QrCameraPreview(
+                        onQrDetected = { url ->
+                            if (scannedMac == null) {
+                                val mac = extractMacFromUrl(url)
+                                if (mac != null) {
+                                    scannedMac = mac
+                                    onMacScanned(mac)
+                                } else {
+                                    invalidQrEvents.trySend(Unit)
+                                }
+                            }
+                        },
+                        onInvalidQr = { invalidQrEvents.trySend(Unit) },
+                        onError = { cameraError = it }
+                    )
 
-                // Hint overlay
-                Text(
-                    "Point at the QR code on your printer",
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(32.dp),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                    Text(
+                        "Point at the QR code on your printer",
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(32.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Color.White
+                    )
+                }
             }
         }
     }
@@ -123,18 +205,22 @@ fun QrScannerScreen(
 
 @Composable
 private fun QrCameraPreview(
-    onQrDetected: (String) -> Unit
+    onQrDetected: (String) -> Unit,
+    onInvalidQr: () -> Unit,
+    onError: (String) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val previewView = remember { PreviewView(context) }
 
-    AndroidView(
-        factory = { ctx ->
-            val previewView = PreviewView(ctx)
+    DisposableEffect(lifecycleOwner) {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        var cameraProvider: ProcessCameraProvider? = null
 
-            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-            cameraProviderFuture.addListener({
-                val cameraProvider = cameraProviderFuture.get()
+        cameraProviderFuture.addListener({
+            try {
+                val provider = cameraProviderFuture.get()
+                cameraProvider = provider
 
                 val preview = Preview.Builder().build().also {
                     it.surfaceProvider = previewView.surfaceProvider
@@ -145,23 +231,32 @@ private fun QrCameraPreview(
                     .build()
 
                 val scanner = BarcodeScanning.getClient()
-
                 imageAnalysis.setAnalyzer(Dispatchers.Default.asExecutor()) { imageProxy ->
-                    processBarcode(imageProxy, scanner, onQrDetected)
+                    processBarcode(imageProxy, scanner, onQrDetected, onInvalidQr)
                 }
 
-                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                provider.unbindAll()
+                provider.bindToLifecycle(
+                    lifecycleOwner,
+                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    preview,
+                    imageAnalysis
+                )
+            } catch (e: Exception) {
+                onError(e.message ?: "Camera failed to start")
+            }
+        }, ContextCompat.getMainExecutor(context))
 
-                try {
-                    cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(
-                        lifecycleOwner, cameraSelector, preview, imageAnalysis
-                    )
-                } catch (_: Exception) {}
-            }, ContextCompat.getMainExecutor(ctx))
+        onDispose {
+            try {
+                cameraProvider?.unbindAll()
+            } catch (_: Exception) {
+            }
+        }
+    }
 
-            previewView
-        },
+    AndroidView(
+        factory = { previewView },
         modifier = Modifier.fillMaxSize()
     )
 }
@@ -170,7 +265,8 @@ private fun QrCameraPreview(
 private fun processBarcode(
     imageProxy: ImageProxy,
     scanner: com.google.mlkit.vision.barcode.BarcodeScanner,
-    onQrDetected: (String) -> Unit
+    onQrDetected: (String) -> Unit,
+    onInvalidQr: () -> Unit
 ) {
     val mediaImage = imageProxy.image
     if (mediaImage == null) {
@@ -185,7 +281,11 @@ private fun processBarcode(
                 if (barcode.valueType == Barcode.TYPE_URL || barcode.valueType == Barcode.TYPE_TEXT) {
                     val rawValue = barcode.rawValue ?: continue
                     if (rawValue.contains("mac=", ignoreCase = true)) {
-                        onQrDetected(rawValue)
+                        if (extractMacFromUrl(rawValue) != null) {
+                            onQrDetected(rawValue)
+                        } else {
+                            onInvalidQr()
+                        }
                         break
                     }
                 }

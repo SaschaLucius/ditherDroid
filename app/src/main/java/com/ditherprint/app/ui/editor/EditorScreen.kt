@@ -5,35 +5,107 @@ import android.graphics.RectF
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.*
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.runtime.getValue
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Battery0Bar
+import androidx.compose.material.icons.filled.Battery2Bar
+import androidx.compose.material.icons.filled.Battery4Bar
+import androidx.compose.material.icons.filled.Battery5Bar
+import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalDensity
 import com.ditherprint.app.dithering.DitherAlgorithm
 import com.ditherprint.app.printer.PhomemoBleManager
-import com.ditherprint.app.printer.PhomemoProtocol
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,7 +129,8 @@ fun EditorScreen(
     val errorDiffusionStrength by viewModel.errorDiffusionStrength.collectAsState()
     val serpentine by viewModel.serpentine.collectAsState()
     val isPrinting by viewModel.isPrinting.collectAsState()
-    val printError by viewModel.printError.collectAsState()
+    val isLoadingImage by viewModel.isLoadingImage.collectAsState()
+    val isDithering by viewModel.isDithering.collectAsState()
     val connectionState by viewModel.bleManager.state.collectAsState()
     val printProgress by viewModel.bleManager.printProgress.collectAsState()
     val favorites by viewModel.favorites.collectAsState()
@@ -72,22 +145,26 @@ fun EditorScreen(
         uri?.let { viewModel.loadImage(it) }
     }
 
-    // Print error snackbar
     val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(printError) {
-        printError?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.clearPrintError()
+    LaunchedEffect(Unit) {
+        viewModel.userMessage.collect { message ->
+            snackbarHostState.showSnackbar(message)
         }
     }
 
+    var overflowOpen by remember { mutableStateOf(false) }
+    val isConnected = connectionState is PhomemoBleManager.ConnectionState.Connected
+    val hasImage = originalBitmap != null
+    val canPrint = isConnected && !isPrinting && ditheredBitmap != null && !isLoadingImage
+
     Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("DitherPrint") },
                 actions = {
-                    if (originalBitmap != null) {
+                    if (hasImage) {
                         if (isCropping) {
                             IconButton(onClick = { viewModel.applyCrop() }) {
                                 Icon(Icons.Default.Check, contentDescription = "Apply crop")
@@ -99,16 +176,15 @@ fun EditorScreen(
                             IconButton(onClick = { viewModel.toggleCropMode() }) {
                                 Icon(Icons.Default.Crop, contentDescription = "Crop")
                             }
+                            IconButton(onClick = { viewModel.toggleShowOriginal() }) {
+                                Icon(
+                                    if (showOriginal) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (showOriginal) "Show dithered" else "Show original"
+                                )
+                            }
                         }
                     }
-                    IconButton(onClick = { viewModel.saveToGallery() }) {
-                        Icon(Icons.Default.Save, contentDescription = "Save to gallery")
-                    }
-                    IconButton(onClick = { viewModel.showSaveFavoriteDialog() }) {
-                        Icon(Icons.Default.Star, contentDescription = "Save favorite")
-                    }
-                    // Battery indicator (when connected)
-                    if (connectionState is PhomemoBleManager.ConnectionState.Connected && printerInfo.battery != null) {
+                    if (isConnected && printerInfo.battery != null) {
                         val bat = printerInfo.battery!!
                         val batteryIcon = when {
                             bat <= 5 -> Icons.Default.Battery0Bar
@@ -126,21 +202,56 @@ fun EditorScreen(
                             batteryIcon,
                             contentDescription = "Battery $bat%",
                             tint = batteryColor,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier
+                                .size(20.dp)
+                                .padding(end = 4.dp)
                         )
                     }
                     IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        Icon(Icons.Default.Settings, contentDescription = "Printer settings")
+                    }
+                    Box {
+                        IconButton(onClick = { overflowOpen = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More actions")
+                        }
+                        DropdownMenu(
+                            expanded = overflowOpen,
+                            onDismissRequest = { overflowOpen = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Save to gallery") },
+                                leadingIcon = { Icon(Icons.Default.Save, contentDescription = null) },
+                                onClick = {
+                                    overflowOpen = false
+                                    viewModel.saveToGallery()
+                                },
+                                enabled = ditheredBitmap != null
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Save favorite") },
+                                leadingIcon = { Icon(Icons.Default.Star, contentDescription = null) },
+                                onClick = {
+                                    overflowOpen = false
+                                    viewModel.showSaveFavoriteDialog()
+                                }
+                            )
+                        }
                     }
                 }
             )
         },
         floatingActionButton = {
-            val isConnected = connectionState is PhomemoBleManager.ConnectionState.Connected
             ExtendedFloatingActionButton(
                 onClick = {
-                    if (isConnected) viewModel.print()
-                    else onNavigateToSettings()
+                    when {
+                        !isConnected -> onNavigateToSettings()
+                        canPrint -> viewModel.print()
+                        isPrinting -> Unit
+                        else -> {
+                            // Message emitted via print preflight or snackbar path
+                            viewModel.print()
+                        }
+                    }
                 },
                 icon = {
                     if (isPrinting) {
@@ -149,19 +260,23 @@ fun EditorScreen(
                             strokeWidth = 2.dp
                         )
                     } else {
-                        Icon(Icons.Default.Print, contentDescription = "Print")
+                        Icon(Icons.Default.Print, contentDescription = null)
                     }
                 },
                 text = {
                     Text(
                         when {
-                            isPrinting -> "Printing... ${((printProgress?.percent ?: 0f) * 100).toInt()}%"
+                            isPrinting -> {
+                                val pct = ((printProgress?.percent ?: 0f) * 100).toInt()
+                                "Printing… $pct%"
+                            }
                             isConnected -> "Print"
                             else -> "Connect Printer"
                         }
                     )
                 },
-                expanded = true
+                expanded = true,
+                modifier = Modifier.navigationBarsPadding()
             )
         }
     ) { padding ->
@@ -170,7 +285,6 @@ fun EditorScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Image preview area
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -179,69 +293,106 @@ fun EditorScreen(
                 contentAlignment = Alignment.Center
             ) {
                 val bitmapToShow = if (showOriginal) originalBitmap else (ditheredBitmap ?: originalBitmap)
-                if (isCropping && rawBitmap != null) {
-                    CroppableImage(
-                        bitmap = rawBitmap!!,
-                        cropRect = cropRect,
-                        onCropRectChange = { viewModel.updateCropRect(it) },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    Badge(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(8.dp)
-                    ) {
-                        Text("Crop", modifier = Modifier.padding(horizontal = 4.dp))
-                    }
-                } else if (bitmapToShow != null) {
-                    ZoomableImage(
-                        bitmap = bitmapToShow,
-                        modifier = Modifier.fillMaxSize(),
-                        onClick = { viewModel.toggleShowOriginal() }
-                    )
-                    // Show indicator
-                    if (showOriginal) {
+                when {
+                    isCropping && rawBitmap != null -> {
+                        CroppableImage(
+                            bitmap = rawBitmap!!,
+                            cropRect = cropRect,
+                            onCropRectChange = { viewModel.updateCropRect(it) },
+                            modifier = Modifier.fillMaxSize()
+                        )
                         Badge(
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .padding(8.dp)
                         ) {
-                            Text("Original", modifier = Modifier.padding(horizontal = 4.dp))
+                            Text("Crop", modifier = Modifier.padding(horizontal = 4.dp))
                         }
                     }
-                } else {
-                    // No image loaded yet
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Image,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    isLoadingImage -> {
+                        CircularProgressIndicator()
+                    }
+                    bitmapToShow != null -> {
+                        ZoomableImage(
+                            bitmap = bitmapToShow,
+                            modifier = Modifier.fillMaxSize()
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = {
-                            photoPicker.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        }) {
-                            Icon(Icons.Default.PhotoLibrary, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Select Photo")
+                        if (showOriginal) {
+                            Badge(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(8.dp)
+                            ) {
+                                Text("Original", modifier = Modifier.padding(horizontal = 4.dp))
+                            }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(onClick = onNavigateToCamera) {
-                            Icon(Icons.Default.CameraAlt, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Camera")
+                        if (isDithering) {
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .padding(8.dp)
+                            )
+                        }
+                        if (isPrinting) {
+                            val progress = printProgress?.percent ?: 0f
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .fillMaxWidth()
+                                    .padding(8.dp)
+                                    .semantics {
+                                        contentDescription = "Print progress"
+                                        stateDescription = "${(progress * 100).toInt()} percent"
+                                    }
+                            )
+                        }
+                    }
+                    else -> {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Image,
+                                contentDescription = null,
+                                modifier = Modifier.size(64.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                "Start with a photo",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "Pick from gallery or take a picture, then dither and print.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(onClick = {
+                                photoPicker.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            }) {
+                                Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Select Photo")
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(onClick = onNavigateToCamera) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Camera")
+                            }
                         }
                     }
                 }
             }
 
-            // Controls panel
             if (originalBitmap != null) {
                 ControlsPanel(
                     algorithm = algorithm,
@@ -276,7 +427,6 @@ fun EditorScreen(
             }
         }
 
-        // Save favorite dialog
         if (showSaveDialog) {
             SaveFavoriteDialog(
                 onDismiss = viewModel::dismissSaveFavoriteDialog,
@@ -289,15 +439,14 @@ fun EditorScreen(
 @Composable
 private fun ZoomableImage(
     bitmap: Bitmap,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
+    modifier: Modifier = Modifier
 ) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
     Image(
         bitmap = bitmap.asImageBitmap(),
-        contentDescription = "Dithered preview",
+        contentDescription = "Image preview",
         modifier = modifier
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, _ ->
@@ -305,7 +454,6 @@ private fun ZoomableImage(
                     offset += pan
                 }
             }
-            .clickable(onClick = onClick)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -313,7 +461,7 @@ private fun ZoomableImage(
                 translationY = offset.y
             },
         contentScale = ContentScale.Fit,
-        filterQuality = FilterQuality.None  // Keep pixel-sharp for dithered preview
+        filterQuality = FilterQuality.None
     )
 }
 
@@ -330,12 +478,10 @@ private fun CroppableImage(
     val borderColor = Color.White
     val handleRadius = 12.dp
 
-    // Inset so crop handles at edges remain touchable
     val cropPadding = 24.dp
     val density = LocalDensity.current
     val padPx = with(density) { cropPadding.toPx() }
 
-    // Compute the image bounds within the container (with padding for handles)
     fun imageRect(): Rect {
         if (containerSize == IntSize.Zero) return Rect.Zero
         val containerW = containerSize.width.toFloat() - padPx * 2
@@ -358,7 +504,11 @@ private fun CroppableImage(
     }
 
     Box(
-        modifier = modifier.onSizeChanged { containerSize = it }
+        modifier = modifier
+            .onSizeChanged { containerSize = it }
+            .semantics {
+                contentDescription = "Crop region. Drag handles to adjust."
+            }
     ) {
         Image(
             bitmap = bitmap.asImageBitmap(),
@@ -370,17 +520,14 @@ private fun CroppableImage(
             filterQuality = FilterQuality.None
         )
 
-        // Crop overlay
         val currentCropRect by rememberUpdatedState(cropRect)
-
-        // Which edge/corner is being dragged; locked at drag-start so recomposition doesn't break it
         var activeEdge by remember { mutableStateOf("") }
 
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
-                    val handleTouchRadius = 48f
+                    val handleTouchRadius = with(density) { 24.dp.toPx() }
                     detectDragGestures(
                         onDragStart = { touchPos ->
                             val imgRect = imageRect()
@@ -470,17 +617,11 @@ private fun CroppableImage(
             val cropR = imgRect.left + cropRect.right * imgW
             val cropB = imgRect.top + cropRect.bottom * imgH
 
-            // Draw scrim outside crop area
-            // Top
             drawRect(scrimColor, Offset(imgRect.left, imgRect.top), Size(imgW, cropT - imgRect.top))
-            // Bottom
             drawRect(scrimColor, Offset(imgRect.left, cropB), Size(imgW, imgRect.bottom - cropB))
-            // Left
             drawRect(scrimColor, Offset(imgRect.left, cropT), Size(cropL - imgRect.left, cropB - cropT))
-            // Right
             drawRect(scrimColor, Offset(cropR, cropT), Size(imgRect.right - cropR, cropB - cropT))
 
-            // Draw crop border
             drawRect(
                 borderColor,
                 Offset(cropL, cropT),
@@ -488,7 +629,6 @@ private fun CroppableImage(
                 style = Stroke(width = 2.dp.toPx())
             )
 
-            // Draw rule-of-thirds lines
             val thirdW = (cropR - cropL) / 3f
             val thirdH = (cropB - cropT) / 3f
             val guideColor = Color.White.copy(alpha = 0.3f)
@@ -497,13 +637,11 @@ private fun CroppableImage(
                 drawLine(guideColor, Offset(cropL, cropT + thirdH * i), Offset(cropR, cropT + thirdH * i), strokeWidth = 1.dp.toPx())
             }
 
-            // Draw corner handles
             val hr = handleRadius.toPx()
-            val corners = listOf(
+            listOf(
                 Offset(cropL, cropT), Offset(cropR, cropT),
                 Offset(cropL, cropB), Offset(cropR, cropB)
-            )
-            corners.forEach { center ->
+            ).forEach { center ->
                 drawCircle(handleColor, hr, center)
                 drawCircle(Color.Black, hr, center, style = Stroke(width = 1.5.dp.toPx()))
             }
@@ -544,10 +682,15 @@ private fun ControlsPanel(
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
+            .navigationBarsPadding()
+            .padding(bottom = 88.dp)
     ) {
-        // Favorites row
         if (favorites.isNotEmpty()) {
-            Text("Favorites", style = MaterialTheme.typography.labelMedium)
+            Text(
+                "Favorites",
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.semantics { heading() }
+            )
             Spacer(Modifier.height(4.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(favorites) { fav ->
@@ -564,7 +707,6 @@ private fun ControlsPanel(
             Spacer(Modifier.height(12.dp))
         }
 
-        // Algorithm dropdown
         var expanded by remember { mutableStateOf(false) }
         ExposedDropdownMenuBox(
             expanded = expanded,
@@ -596,7 +738,6 @@ private fun ControlsPanel(
             }
         }
 
-        // Bayer size (only shown for Bayer algorithm)
         if (algorithm == DitherAlgorithm.BAYER) {
             Spacer(Modifier.height(8.dp))
             Text("Bayer Size: ${bayerSize}x${bayerSize}", style = MaterialTheme.typography.labelMedium)
@@ -610,79 +751,78 @@ private fun ControlsPanel(
                 }
             }
             Spacer(Modifier.height(4.dp))
-            Text("Bayer Amount: ${"%.2f".format(bayerScale)}", style = MaterialTheme.typography.labelMedium)
-            Slider(
+            LabeledSlider(
+                label = "Bayer Amount",
                 value = bayerScale,
-                onValueChange = onBayerScaleChange,
-                valueRange = 0f..2f,
-                modifier = Modifier.fillMaxWidth()
+                display = "%.2f".format(bayerScale),
+                range = 0f..2f,
+                onChange = onBayerScaleChange
             )
         }
 
-        // Threshold (only shown for Threshold algorithm)
         if (algorithm == DitherAlgorithm.THRESHOLD) {
             Spacer(Modifier.height(8.dp))
-            Text("Threshold: ${(threshold * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
-            Slider(
+            LabeledSlider(
+                label = "Threshold",
                 value = threshold,
-                onValueChange = onThresholdChange,
-                valueRange = 0f..1f,
-                modifier = Modifier.fillMaxWidth()
+                display = "${(threshold * 100).toInt()}%",
+                range = 0f..1f,
+                onChange = onThresholdChange
             )
         }
 
-        // Error diffusion controls (for algorithms with a kernel)
         if (algorithm.kernel != null) {
             Spacer(Modifier.height(8.dp))
-            Text("Error Strength: ${(errorDiffusionStrength * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
-            Slider(
+            LabeledSlider(
+                label = "Error Strength",
                 value = errorDiffusionStrength,
-                onValueChange = onErrorDiffusionStrengthChange,
-                valueRange = 0f..1f,
-                modifier = Modifier.fillMaxWidth()
+                display = "${(errorDiffusionStrength * 100).toInt()}%",
+                range = 0f..1f,
+                onChange = onErrorDiffusionStrengthChange
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSerpentineChange(!serpentine) }
+            ) {
                 Checkbox(checked = serpentine, onCheckedChange = onSerpentineChange)
                 Text("Serpentine scanning")
             }
         }
 
         Spacer(Modifier.height(8.dp))
-
-        // Gamma / exposure slider
-        Text("Exposure: ${"%.2f".format(gamma)}", style = MaterialTheme.typography.labelMedium)
-        Slider(
+        LabeledSlider(
+            label = "Exposure",
             value = gamma,
-            onValueChange = onGammaChange,
-            valueRange = 0.5f..2.5f,
-            modifier = Modifier.fillMaxWidth()
+            display = "%.2f".format(gamma),
+            range = 0.5f..2.5f,
+            onChange = onGammaChange
         )
-
-        // Brightness slider
-        Text("Brightness: ${"%.2f".format(brightness)}", style = MaterialTheme.typography.labelMedium)
-        Slider(
+        LabeledSlider(
+            label = "Brightness",
             value = brightness,
-            onValueChange = onBrightnessChange,
-            valueRange = -1f..1f,
-            modifier = Modifier.fillMaxWidth()
+            display = "%.2f".format(brightness),
+            range = -1f..1f,
+            onChange = onBrightnessChange
         )
-
-        // Contrast slider
-        Text("Contrast: ${"%.2f".format(contrast)}", style = MaterialTheme.typography.labelMedium)
-        Slider(
+        LabeledSlider(
+            label = "Contrast",
             value = contrast,
-            onValueChange = onContrastChange,
-            valueRange = 0f..2f,
-            modifier = Modifier.fillMaxWidth()
+            display = "%.2f".format(contrast),
+            range = 0f..2f,
+            onChange = onContrastChange
         )
 
-        // Invert + Camera + Pick Photo row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { onInvertChange(!invert) }
+            ) {
                 Checkbox(checked = invert, onCheckedChange = onInvertChange)
                 Text("Invert")
             }
@@ -698,6 +838,28 @@ private fun ControlsPanel(
             }
         }
     }
+}
+
+@Composable
+private fun LabeledSlider(
+    label: String,
+    value: Float,
+    display: String,
+    range: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit
+) {
+    Text("$label: $display", style = MaterialTheme.typography.labelMedium)
+    Slider(
+        value = value,
+        onValueChange = onChange,
+        valueRange = range,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                contentDescription = label
+                stateDescription = display
+            }
+    )
 }
 
 @Composable
@@ -721,9 +883,12 @@ private fun SaveFavoriteDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable { setAsDefault = !setAsDefault }
+                ) {
                     Checkbox(checked = setAsDefault, onCheckedChange = { setAsDefault = it })
-                    Text("Set as default (used on share)")
+                    Text("Set as default (used on launch)")
                 }
             }
         },

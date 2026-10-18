@@ -2,14 +2,19 @@ package com.ditherprint.app.ui.settings
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.BatteryUnknown
@@ -20,6 +25,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.ditherprint.app.printer.PhomemoBleManager
@@ -29,6 +37,7 @@ import com.ditherprint.app.ui.editor.EditorViewModel
 private enum class PendingBluetoothAction {
     StartScan,
     Reconnect,
+    ConnectDevice,
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -50,14 +59,15 @@ fun PrinterSettingsScreen(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 add(Manifest.permission.BLUETOOTH_SCAN)
                 add(Manifest.permission.BLUETOOTH_CONNECT)
+            } else {
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
             }
-            add(Manifest.permission.ACCESS_FINE_LOCATION)
         }.toTypedArray()
     }
 
     var permissionsGranted by remember {
         mutableStateOf(
-            blePermissions.all {
+            blePermissions.isEmpty() || blePermissions.all {
                 ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
             }
         )
@@ -66,12 +76,22 @@ fun PrinterSettingsScreen(
     var pendingBluetoothAction by remember {
         mutableStateOf<PendingBluetoothAction?>(null)
     }
+    var pendingConnectMac by remember { mutableStateOf<String?>(null) }
+    var pendingConnectName by remember { mutableStateOf<String?>(null) }
 
     var hasScanned by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(permissionsGranted) {
         if (permissionsGranted) {
             viewModel.bleManager.loadBondedDevices()
+        }
+    }
+
+    LaunchedEffect(connectionState) {
+        val err = connectionState as? PhomemoBleManager.ConnectionState.Error
+        if (err != null) {
+            snackbarHostState.showSnackbar(err.message)
         }
     }
 
@@ -90,13 +110,47 @@ fun PrinterSettingsScreen(
                 PendingBluetoothAction.Reconnect -> {
                     printerSettings.lastPrinterMac?.let(viewModel.bleManager::connectByAddress)
                 }
+                PendingBluetoothAction.ConnectDevice -> {
+                    pendingConnectMac?.let { mac ->
+                        viewModel.bleManager.connectByAddress(mac)
+                        viewModel.savePrinterConnection(mac, pendingConnectName ?: mac)
+                    }
+                }
                 null -> Unit
             }
         }
         pendingBluetoothAction = null
+        pendingConnectMac = null
+        pendingConnectName = null
+    }
+
+    fun runWithPermissions(action: PendingBluetoothAction, mac: String? = null, name: String? = null) {
+        if (permissionsGranted) {
+            when (action) {
+                PendingBluetoothAction.StartScan -> {
+                    hasScanned = true
+                    viewModel.bleManager.startScan()
+                }
+                PendingBluetoothAction.Reconnect -> {
+                    printerSettings.lastPrinterMac?.let(viewModel.bleManager::connectByAddress)
+                }
+                PendingBluetoothAction.ConnectDevice -> {
+                    val address = mac ?: return
+                    viewModel.bleManager.connectByAddress(address)
+                    viewModel.savePrinterConnection(address, name ?: address)
+                }
+            }
+        } else {
+            pendingBluetoothAction = action
+            pendingConnectMac = mac
+            pendingConnectName = name
+            permissionLauncher.launch(blePermissions)
+        }
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Printer Settings") },
@@ -115,6 +169,32 @@ fun PrinterSettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (!permissionsGranted) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "Bluetooth permission needed to find and connect to your printer.",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = {
+                                    permissionLauncher.launch(blePermissions)
+                                }) { Text("Grant permission") }
+                                TextButton(onClick = {
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            Uri.fromParts("package", context.packageName, null)
+                                        )
+                                    )
+                                }) { Text("App settings") }
+                            }
+                        }
+                    }
+                }
+            }
             // Connection section
             item {
                 Text(
@@ -170,12 +250,7 @@ fun PrinterSettingsScreen(
                                         // Direct reconnect if we have a saved MAC
                                         if (printerSettings.lastPrinterMac != null) {
                                             Button(onClick = {
-                                                if (permissionsGranted) {
-                                                    viewModel.bleManager.connectByAddress(printerSettings.lastPrinterMac!!)
-                                                } else {
-                                                    pendingBluetoothAction = PendingBluetoothAction.Reconnect
-                                                    permissionLauncher.launch(blePermissions)
-                                                }
+                                                runWithPermissions(PendingBluetoothAction.Reconnect)
                                             }) {
                                                 Icon(Icons.Default.BluetoothConnected, contentDescription = null)
                                                 Spacer(Modifier.width(4.dp))
@@ -184,13 +259,7 @@ fun PrinterSettingsScreen(
                                             Spacer(Modifier.height(4.dp))
                                         }
                                         OutlinedButton(onClick = {
-                                            hasScanned = true
-                                            if (permissionsGranted) {
-                                                viewModel.bleManager.startScan()
-                                            } else {
-                                                pendingBluetoothAction = PendingBluetoothAction.StartScan
-                                                permissionLauncher.launch(blePermissions)
-                                            }
+                                            runWithPermissions(PendingBluetoothAction.StartScan)
                                         }) {
                                             Icon(Icons.AutoMirrored.Filled.BluetoothSearching, contentDescription = null)
                                             Spacer(Modifier.width(4.dp))
@@ -227,9 +296,23 @@ fun PrinterSettingsScreen(
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .semantics {
+                                contentDescription = "Connect to $deviceName"
+                                onClick(label = "Connect") {
+                                    runWithPermissions(
+                                        PendingBluetoothAction.ConnectDevice,
+                                        device.address,
+                                        deviceName
+                                    )
+                                    true
+                                }
+                            }
                             .clickable {
-                                viewModel.bleManager.connectByAddress(device.address)
-                                viewModel.savePrinterConnection(device.address, deviceName)
+                                runWithPermissions(
+                                    PendingBluetoothAction.ConnectDevice,
+                                    device.address,
+                                    deviceName
+                                )
                             }
                     ) {
                         Row(
@@ -247,7 +330,7 @@ fun PrinterSettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Icon(Icons.Default.Bluetooth, contentDescription = "Connect")
+                            Icon(Icons.Default.Bluetooth, contentDescription = null)
                         }
                     }
                 }
@@ -276,9 +359,23 @@ fun PrinterSettingsScreen(
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .semantics {
+                                contentDescription = "Connect to $deviceName"
+                                onClick(label = "Connect") {
+                                    runWithPermissions(
+                                        PendingBluetoothAction.ConnectDevice,
+                                        device.address,
+                                        deviceName
+                                    )
+                                    true
+                                }
+                            }
                             .clickable {
-                                viewModel.bleManager.connectByAddress(device.address)
-                                viewModel.savePrinterConnection(device.address, deviceName)
+                                runWithPermissions(
+                                    PendingBluetoothAction.ConnectDevice,
+                                    device.address,
+                                    deviceName
+                                )
                             }
                     ) {
                         Row(
@@ -296,7 +393,7 @@ fun PrinterSettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Icon(Icons.Default.BluetoothConnected, contentDescription = "Connect")
+                            Icon(Icons.Default.BluetoothConnected, contentDescription = null)
                         }
                     }
                 }
@@ -512,7 +609,10 @@ fun PrinterSettingsScreen(
             }
 
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
                     PhomemoProtocol.PaperSize.entries.forEach { size ->
                         FilterChip(
                             selected = printerSettings.paperSize == size,
@@ -570,7 +670,10 @@ fun PrinterSettingsScreen(
             }
 
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
                     PhomemoProtocol.Alignment.entries.forEach { alignment ->
                         FilterChip(
                             selected = printerSettings.alignment == alignment,

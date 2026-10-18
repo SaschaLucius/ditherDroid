@@ -76,6 +76,9 @@ jobs:
         id: version
         run: echo "code=$(git tag --list 'v*' | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
 
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest
+
       - name: Build Release APK
         run: |
           ./gradlew assembleRelease \

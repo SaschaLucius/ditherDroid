@@ -14,7 +14,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -36,7 +35,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Extract shared image URI if launched via share intent
         handleShareIntent(intent)?.let { sharedImageUri.value = it }
 
         setContent {
@@ -76,15 +74,13 @@ fun DitherPrintNavigation(sharedImageUriFlow: MutableStateFlow<Uri?>) {
     val navController = rememberNavController()
     val viewModel: EditorViewModel = viewModel()
 
-    // Load shared image when URI changes and open the editor
     val sharedUri by sharedImageUriFlow.collectAsState()
-    // Capture start destination once — changing it later would recreate the NavGraph
-    val startDestination = remember { if (sharedImageUriFlow.value != null) "editor" else "camera" }
     LaunchedEffect(sharedUri) {
         sharedUri?.let { uri ->
             viewModel.loadImage(uri)
             if (navController.currentDestination?.route != "editor") {
                 navController.navigate("editor") {
+                    popUpTo("editor") { inclusive = false }
                     launchSingleTop = true
                 }
             }
@@ -92,31 +88,44 @@ fun DitherPrintNavigation(sharedImageUriFlow: MutableStateFlow<Uri?>) {
         }
     }
 
-    NavHost(navController = navController, startDestination = startDestination) {
+    NavHost(navController = navController, startDestination = "editor") {
         composable("editor") {
             EditorScreen(
                 viewModel = viewModel,
-                onNavigateToSettings = { navController.navigate("settings") },
-                onNavigateToCamera = { navController.navigate("camera") }
+                onNavigateToSettings = {
+                    navController.navigate("settings") {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToCamera = {
+                    navController.navigate("camera") {
+                        launchSingleTop = true
+                    }
+                }
             )
         }
         composable("settings") {
             PrinterSettingsScreen(
                 viewModel = viewModel,
                 onBack = { navController.popBackStack() },
-                onScanQr = { navController.navigate("qr_scanner") }
+                onScanQr = {
+                    navController.navigate("qr_scanner") {
+                        launchSingleTop = true
+                    }
+                }
             )
         }
         composable("camera") {
             CameraScreen(
                 viewModel = viewModel,
-                onBack = { navController.navigate("editor") },
-                onCapture = { navController.navigate("editor") }
+                onBack = { navController.popBackStack() },
+                onCapture = { navController.popBackStack() }
             )
         }
         composable("qr_scanner") {
             QrScannerScreen(
                 onMacScanned = { mac ->
+                    viewModel.savePrinterConnection(mac, "Phomemo $mac")
                     viewModel.bleManager.connectByAddress(mac)
                     navController.popBackStack()
                 },

@@ -16,7 +16,6 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
  */
 class SettingsRepository(private val context: Context) {
 
-    // Printer settings keys
     private val LAST_PRINTER_MAC = stringPreferencesKey("last_printer_mac")
     private val LAST_PRINTER_NAME = stringPreferencesKey("last_printer_name")
     private val DENSITY = intPreferencesKey("density")
@@ -25,16 +24,18 @@ class SettingsRepository(private val context: Context) {
     private val PAPER_FEED = intPreferencesKey("paper_feed")
     private val ALIGNMENT = stringPreferencesKey("alignment")
 
-    // Favorite (default) dither settings
     private val FAV_ALGORITHM = stringPreferencesKey("fav_algorithm")
     private val FAV_BRIGHTNESS = floatPreferencesKey("fav_brightness")
     private val FAV_CONTRAST = floatPreferencesKey("fav_contrast")
     private val FAV_INVERT = booleanPreferencesKey("fav_invert")
     private val FAV_BAYER_SIZE = intPreferencesKey("fav_bayer_size")
+    private val FAV_BAYER_SCALE = floatPreferencesKey("fav_bayer_scale")
+    private val FAV_THRESHOLD = floatPreferencesKey("fav_threshold")
+    private val FAV_GAMMA = floatPreferencesKey("fav_gamma")
+    private val FAV_ERROR_STRENGTH = floatPreferencesKey("fav_error_strength")
+    private val FAV_SERPENTINE = booleanPreferencesKey("fav_serpentine")
 
-    // Saved favorites list (simple JSON-like key-value approach)
-    // Each favorite: fav_{name}_algorithm, fav_{name}_brightness, etc.
-    private val FAVORITE_NAMES = stringPreferencesKey("favorite_names") // comma-separated
+    private val FAVORITE_NAMES = stringPreferencesKey("favorite_names")
     private val DEFAULT_FAVORITE = stringPreferencesKey("default_favorite")
 
     data class PrinterSettings(
@@ -52,7 +53,12 @@ class SettingsRepository(private val context: Context) {
         val brightness: Float = 0f,
         val contrast: Float = 1f,
         val invert: Boolean = false,
-        val bayerSize: Int = 4
+        val bayerSize: Int = 4,
+        val bayerScale: Float = 1f,
+        val threshold: Float = 0.5f,
+        val gamma: Float = 1.5f,
+        val errorDiffusionStrength: Float = 1f,
+        val serpentine: Boolean = false
     )
 
     data class Favorite(
@@ -89,7 +95,12 @@ class SettingsRepository(private val context: Context) {
             brightness = prefs[FAV_BRIGHTNESS] ?: 0f,
             contrast = prefs[FAV_CONTRAST] ?: 1f,
             invert = prefs[FAV_INVERT] ?: false,
-            bayerSize = prefs[FAV_BAYER_SIZE] ?: 4
+            bayerSize = prefs[FAV_BAYER_SIZE] ?: 4,
+            bayerScale = prefs[FAV_BAYER_SCALE] ?: 1f,
+            threshold = prefs[FAV_THRESHOLD] ?: 0.5f,
+            gamma = prefs[FAV_GAMMA] ?: 1.5f,
+            errorDiffusionStrength = prefs[FAV_ERROR_STRENGTH] ?: 1f,
+            serpentine = prefs[FAV_SERPENTINE] ?: false
         )
     }
 
@@ -99,18 +110,27 @@ class SettingsRepository(private val context: Context) {
         names.map { name ->
             Favorite(
                 name = name,
-                settings = DitherSettings(
-                    algorithm = prefs[stringPreferencesKey("fav_${name}_alg")]?.let { a ->
-                        DitherAlgorithm.entries.find { it.name == a }
-                    } ?: DitherAlgorithm.FLOYD_STEINBERG,
-                    brightness = prefs[floatPreferencesKey("fav_${name}_bri")] ?: 0f,
-                    contrast = prefs[floatPreferencesKey("fav_${name}_con")] ?: 1f,
-                    invert = prefs[booleanPreferencesKey("fav_${name}_inv")] ?: false,
-                    bayerSize = prefs[intPreferencesKey("fav_${name}_bay")] ?: 4
-                ),
+                settings = readFavoriteSettings(prefs, name),
                 isDefault = name == defaultName
             )
         }
+    }
+
+    private fun readFavoriteSettings(prefs: Preferences, name: String): DitherSettings {
+        return DitherSettings(
+            algorithm = prefs[stringPreferencesKey("fav_${name}_alg")]?.let { a ->
+                DitherAlgorithm.entries.find { it.name == a }
+            } ?: DitherAlgorithm.FLOYD_STEINBERG,
+            brightness = prefs[floatPreferencesKey("fav_${name}_bri")] ?: 0f,
+            contrast = prefs[floatPreferencesKey("fav_${name}_con")] ?: 1f,
+            invert = prefs[booleanPreferencesKey("fav_${name}_inv")] ?: false,
+            bayerSize = prefs[intPreferencesKey("fav_${name}_bay")] ?: 4,
+            bayerScale = prefs[floatPreferencesKey("fav_${name}_bsc")] ?: 1f,
+            threshold = prefs[floatPreferencesKey("fav_${name}_thr")] ?: 0.5f,
+            gamma = prefs[floatPreferencesKey("fav_${name}_gam")] ?: 1.5f,
+            errorDiffusionStrength = prefs[floatPreferencesKey("fav_${name}_err")] ?: 1f,
+            serpentine = prefs[booleanPreferencesKey("fav_${name}_serp")] ?: false
+        )
     }
 
     suspend fun savePrinterSettings(mac: String, name: String) {
@@ -152,27 +172,43 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun saveFavorite(name: String, settings: DitherSettings, setAsDefault: Boolean = false) {
         context.dataStore.edit { prefs ->
-            // Add name to list
-            val existing = prefs[FAVORITE_NAMES]?.split(",")?.filter { it.isNotBlank() }?.toMutableList() ?: mutableListOf()
+            val existing = prefs[FAVORITE_NAMES]?.split(",")?.filter { it.isNotBlank() }?.toMutableList()
+                ?: mutableListOf()
             if (name !in existing) existing.add(name)
             prefs[FAVORITE_NAMES] = existing.joinToString(",")
 
-            // Store settings
             prefs[stringPreferencesKey("fav_${name}_alg")] = settings.algorithm.name
             prefs[floatPreferencesKey("fav_${name}_bri")] = settings.brightness
             prefs[floatPreferencesKey("fav_${name}_con")] = settings.contrast
             prefs[booleanPreferencesKey("fav_${name}_inv")] = settings.invert
             prefs[intPreferencesKey("fav_${name}_bay")] = settings.bayerSize
+            prefs[floatPreferencesKey("fav_${name}_bsc")] = settings.bayerScale
+            prefs[floatPreferencesKey("fav_${name}_thr")] = settings.threshold
+            prefs[floatPreferencesKey("fav_${name}_gam")] = settings.gamma
+            prefs[floatPreferencesKey("fav_${name}_err")] = settings.errorDiffusionStrength
+            prefs[booleanPreferencesKey("fav_${name}_serp")] = settings.serpentine
 
             if (setAsDefault) {
                 prefs[DEFAULT_FAVORITE] = name
+                // Mirror into the legacy "default" keys used on cold start
+                prefs[FAV_ALGORITHM] = settings.algorithm.name
+                prefs[FAV_BRIGHTNESS] = settings.brightness
+                prefs[FAV_CONTRAST] = settings.contrast
+                prefs[FAV_INVERT] = settings.invert
+                prefs[FAV_BAYER_SIZE] = settings.bayerSize
+                prefs[FAV_BAYER_SCALE] = settings.bayerScale
+                prefs[FAV_THRESHOLD] = settings.threshold
+                prefs[FAV_GAMMA] = settings.gamma
+                prefs[FAV_ERROR_STRENGTH] = settings.errorDiffusionStrength
+                prefs[FAV_SERPENTINE] = settings.serpentine
             }
         }
     }
 
     suspend fun deleteFavorite(name: String) {
         context.dataStore.edit { prefs ->
-            val existing = prefs[FAVORITE_NAMES]?.split(",")?.filter { it.isNotBlank() }?.toMutableList() ?: mutableListOf()
+            val existing = prefs[FAVORITE_NAMES]?.split(",")?.filter { it.isNotBlank() }?.toMutableList()
+                ?: mutableListOf()
             existing.remove(name)
             prefs[FAVORITE_NAMES] = existing.joinToString(",")
 
@@ -181,6 +217,11 @@ class SettingsRepository(private val context: Context) {
             prefs.remove(floatPreferencesKey("fav_${name}_con"))
             prefs.remove(booleanPreferencesKey("fav_${name}_inv"))
             prefs.remove(intPreferencesKey("fav_${name}_bay"))
+            prefs.remove(floatPreferencesKey("fav_${name}_bsc"))
+            prefs.remove(floatPreferencesKey("fav_${name}_thr"))
+            prefs.remove(floatPreferencesKey("fav_${name}_gam"))
+            prefs.remove(floatPreferencesKey("fav_${name}_err"))
+            prefs.remove(booleanPreferencesKey("fav_${name}_serp"))
 
             if (prefs[DEFAULT_FAVORITE] == name) {
                 prefs.remove(DEFAULT_FAVORITE)
